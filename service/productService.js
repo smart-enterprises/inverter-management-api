@@ -333,9 +333,7 @@ const productService = {
                 throw new BadRequestException(`Invalid product category: ${normalizedCategory}. Allowed categories: ${Object.keys(PRODUCT_CATEGORIES).join(", ")}`);
             }
 
-            if (product.product_category !== normalizedCategory) {
-                updates.product_category = normalizedCategory;
-            }
+            updates.product_category = normalizedCategory;
         }
 
         // Detect Price Change
@@ -581,6 +579,7 @@ const productService = {
 
     getByProductId: asyncHandler(async (productId) => {
         const product = await Product.findOne({ product_id: productId });
+
         if (!product) throw new BadRequestException(`No product found with ID ${productId}`);
         return fetchProductWithStocks(product);
     }),
