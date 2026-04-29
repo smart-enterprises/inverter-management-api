@@ -14,7 +14,7 @@ import { setupSSEHeaders, sendHeartbeat } from "../middleware/sseMiddleware.js";
 import logger from "../utils/logger.js";
 
 const notificationController = {
-    // GET /notifications/stream - Establishes a persistent SSE connection for the authenticated user.
+    // GET /notifications/stream
     stream: asyncHandler(async (req, res) => {
         const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
 
@@ -23,6 +23,7 @@ const notificationController = {
 
         // Send initial "connected" event with unread count
         const unreadCount = await getUnreadCount(employeeId, employeeRole);
+
         res.write(`event: connected\n`);
         res.write(
             `data: ${JSON.stringify({
@@ -32,10 +33,8 @@ const notificationController = {
             })}\n\n`
         );
 
-        // Heartbeat every 25 seconds to prevent proxy/browser timeouts
-        const heartbeatInterval = setInterval(() => {
-            sendHeartbeat(res);
-        }, 25000);
+        // Heartbeat every 25 s to keep proxy/browser connections alive
+        const heartbeatInterval = setInterval(() => sendHeartbeat(res), 25_000);
 
         // Cleanup on client disconnect
         req.on("close", () => {
@@ -50,9 +49,10 @@ const notificationController = {
         });
     }),
 
-    // GET /notifications - Returns paginated notifications for the authenticated user.
+    // GET /notifications
     getAll: asyncHandler(async (req, res) => {
         const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
+
         const page = Number(req.query.page) || 1;
         const limit = Number(req.query.limit) || 20;
 
