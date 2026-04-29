@@ -24,7 +24,8 @@ import { allDetailsDelivered, canMoveOrderToTargetStatus, deriveOrderStatusFromD
 import { validateOrderCreator, validateOrderDTO } from "./orderValidation.js";
 import { persistStockReturns, returnStockForDetail } from "./orderStock.js";
 import { buildDateRange, fetchDealerAndOrderDetails } from "./orderHelpers.js";
-import { notifyOrderCreated } from "../notificationService.js";
+import { notifyOrderConfirmed, notifyOrderCreated, notifyOrderStatusChanged } from "../notificationService.js";
+import { fireNotification, shouldNotifyStatusChange } from "./orderHelpers.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -83,10 +84,8 @@ const orderService = {
             let unpackedUsed = 0;
 
             if (isBattery) {
-                // ✅ Battery Logic: always treat as packed, skip production
                 packedUsed = qtyOrdered;
-                unpackedUsed = 0;
-                productionRequired = 0;
+                // ✅ Battery Logic: always treat as packed, skip production
                 logger.info(`🔋 Battery product detected: ${product.product_id} | Qty: ${qtyOrdered} → Direct PACKED`);
             } else {
                 // ✅ Existing stock allocation logic for non-battery products
@@ -113,7 +112,6 @@ const orderService = {
                 UNPACKED: unpackedUsed || 0,
                 PRODUCTION: productionRequired || 0
             };
-
             const stockFlags = {
                 ...stockUsage,
                 hasUnpacked: unpackedUsed > 0,
@@ -121,7 +119,6 @@ const orderService = {
             };
 
             const unitPrice = normalizePrice(product.price) || 0;
-
             let unitDiscount = 0;
             let discountNotes = [];
 
@@ -204,7 +201,7 @@ const orderService = {
                             ? ORDER_STATUSES.PRODUCTION
                             : ORDER_STATUSES.PACKED;
 
-            const orderDetails = {
+            orderDetailsPayload.push({
                 order_details_number: await generateUniqueOrderDetailsId(),
                 order_number: orderNumber,
 
@@ -233,9 +230,7 @@ const orderService = {
                 total_price: round(totalPrice),
 
                 is_free: isProductScheme
-            };
-
-            orderDetailsPayload.push(orderDetails);
+            });
         }
 
         order.status =
@@ -251,23 +246,14 @@ const orderService = {
 
         if (dto.delivery_date != null) {
             const parsedDate = new Date(dto.delivery_date);
-
-            if (Number.isNaN(parsedDate.getTime())) {
+            if (Number.isNaN(parsedDate.getTime()))
                 throw new BadRequestException("Invalid delivery_date format");
-            }
-
             order.promised_delivery_date = parsedDate;
-        } else {
-            if (orderDetailsPayload.length > 0) {
-                const maxDeliveryDate = orderDetailsPayload
-                    .map(d => new Date(d.delivery_date))
-                    .filter(d => !Number.isNaN(d.getTime()))
-                    .reduce((latest, current) =>
-                        current > latest ? current : latest
-                    );
-
-                order.promised_delivery_date = maxDeliveryDate;
-            }
+        } else if (orderDetailsPayload.length > 0) {
+            order.promised_delivery_date = orderDetailsPayload
+                .map((d) => new Date(d.delivery_date))
+                .filter((d) => !Number.isNaN(d.getTime()))
+                .reduce((latest, current) => (current > latest ? current : latest));
         }
 
         if (Number(dto.amount_paid) > 0) {
@@ -278,17 +264,17 @@ const orderService = {
         }
 
         await order.save();
-
         const orderDetailsList = await OrderDetails.insertMany(orderDetailsPayload);
-        logger.info(`✅ Order created successfully — Order#: ${orderNumber} | Total Items: ${orderDetailsList.length}`);
 
-        // Trigger notification (non-blocking — errors won't fail the order)
-        notifyOrderCreated({
-            order: { ...order.toObject(), order_details: orderDetailsList },
-            dealer,
-            createdBy: employeeId,
-        }).catch((err) =>
-            logger.error("[Notification] Non-fatal error:", err.message)
+        logger.info(`✅ Order created — #${orderNumber} | Items: ${orderDetailsList.length}`);
+
+        // ── Notification: Order Created (non-blocking)
+        fireNotification(
+            notifyOrderCreated({
+                order: { ...order.toObject(), order_details: orderDetailsList },
+                dealer,
+                createdBy: employeeId,
+            })
         );
 
         return transformOrderToResponse(order, dealer, orderDetailsList);
@@ -326,7 +312,6 @@ const orderService = {
         endDate,
         deliveryStartDate,
         deliveryEndDate,
-        includeRejected = false
     }) => {
         const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
 
@@ -334,59 +319,25 @@ const orderService = {
         const numericLimit = Math.max(1, Number(limit));
         const skip = (numericPage - 1) * numericLimit;
 
-        /* ------------------------------------------
-            1️⃣ Build Filter Cleanly
-        ------------------------------------------- */
         const filter = {};
 
-        // 🔐 Role-Based Filtering (Clean & Scalable)
         switch (employeeRole) {
-
-            /* 🧑‍💼 Salesman → only their own orders */
             case ROLES.SALESMAN:
                 filter.salesman_id = employeeId;
                 break;
-
-            /* 🏢 Admin-Level → view orders created by them */
-            case ROLES.SUPER_ADMIN:
-            case ROLES.ADMIN:
-            case ROLES.MANAGER:
-                // filter.created_by = employeeId;
-                break;
-
-            /* ⚙️ Operational Roles → no restriction */
-            case ROLES.PRODUCTION:
-            case ROLES.PACKING:
-                // Full access to orders for processing
-                break;
-
-            /* 🛡️ Fallback (safe default) */
             default:
-                // Optional: restrict or allow based on future requirements
-                // filter.created_by = employeeId;
                 break;
         }
 
-        // Status filtering
-        if (status && Object.values(ORDER_STATUSES).includes(status)) {
+        if (status && Object.values(ORDER_STATUSES).includes(status))
             filter.status = status;
-        }
 
-        // Priority filter
-        if (priority) {
-            filter.priority = priority;
-        }
+        if (priority) filter.priority = priority;
+        if (dealer) filter.dealer_id = dealer;
 
-        // Dealer filter (direct filter support)
-        if (dealer) {
-            filter.dealer_id = dealer;
-        }
-
-        // Search filter (order_number / dealer_id / customer_name)
         if (search && search.trim() !== "") {
             const searchRegex = new RegExp(search.trim(), "i");
 
-            // 1️⃣ Find matching dealers first (lean for performance)
             const matchedDealers = await Employee.find({
                 $or: [
                     { employee_name: searchRegex },
@@ -398,10 +349,9 @@ const orderService = {
 
             const dealerIds = matchedDealers.map((d) => d.employee_id);
 
-            // 2️⃣ Apply combined search filter
             filter.$or = [
                 { order_number: searchRegex },
-                { dealer_id: searchRegex }, // direct dealer_id search
+                { dealer_id: searchRegex },
                 ...(dealerIds.length ? [{ dealer_id: { $in: dealerIds } }] : []),
             ];
         }
@@ -415,11 +365,8 @@ const orderService = {
         // delivery date filter
         const deliveryRange = buildDateRange(deliveryStartDate, deliveryEndDate);
         if (deliveryRange) {
-
-            // 1️⃣ Filter on Order collection
             filter.promised_delivery_date = deliveryRange;
 
-            // 2️⃣ Fetch matching OrderDetails (only required fields)
             const matchingDetails = await OrderDetails.find({
                 delivery_date: deliveryRange,
             })
@@ -427,12 +374,10 @@ const orderService = {
                 .lean();
 
             if (matchingDetails.length) {
-                // 3️⃣ Extract unique order numbers
                 const orderNumbersFromDetails = [
                     ...new Set(matchingDetails.map(d => d.order_number)),
                 ];
 
-                // 4️⃣ Merge with existing order_number filter safely
                 if (filter.order_number) {
                     filter.order_number = {
                         $in: [
@@ -450,33 +395,20 @@ const orderService = {
 
         logger.info("📦 Order Filter:", filter);
 
-        /* ------------------------------------------
-            2️⃣ Query with Pagination
-        ------------------------------------------- */
         const [orders, total] = await Promise.all([
             Order.find(filter)
-                .sort({ updated_at: -1 })
+                .sort({ created_at: -1 })
                 .skip(skip)
                 .limit(numericLimit)
-                .lean(), // 🚀 Performance boost
+                .lean(),
 
             Order.countDocuments(filter)
         ]);
 
-        if (!orders.length) {
-            return {
-                orders: [],
-                total: 0,
-                page: numericPage,
-                limit: numericLimit
-            };
-        }
+        if (!orders.length)
+            return { orders: [], total: 0, page: numericPage, limit: numericLimit };
 
-        /* ------------------------------------------
-           3️⃣ Fetch Related Data
-        ------------------------------------------- */
-        const { dealerMap, detailsMap } =
-            await fetchDealerAndOrderDetails(orders);
+        const { dealerMap, detailsMap } = await fetchDealerAndOrderDetails(orders);
 
         const transformedOrders = orders.map(order =>
             transformOrderToResponse(
@@ -486,14 +418,11 @@ const orderService = {
             )
         );
 
-        // the rejected and cancelled orders should be end of the list
         transformedOrders.sort((a, b) => {
-            if (a.status === ORDER_STATUSES.REJECTED || a.status === ORDER_STATUSES.CANCELLED) {
-                return 1;
-            }
-            if (b.status === ORDER_STATUSES.REJECTED || b.status === ORDER_STATUSES.CANCELLED) {
-                return -1;
-            }
+            const isTerminal = (s) =>
+                s === ORDER_STATUSES.REJECTED || s === ORDER_STATUSES.CANCELLED;
+            if (isTerminal(a.status) && !isTerminal(b.status)) return 1;
+            if (!isTerminal(a.status) && isTerminal(b.status)) return -1;
             return 0;
         });
 
@@ -531,9 +460,6 @@ const orderService = {
         const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
         const { year, month, start_date, end_date } = query;
 
-        /* --------------------------------------------------
-           1️⃣ Resolve date range (IST aware)
-        -------------------------------------------------- */
         let startDate;
         let endDate;
 
@@ -541,53 +467,31 @@ const orderService = {
             const base = `${year}-${String(month).padStart(2, "0")}-01`;
             startDate = dayjs(base).startOf("month").toDate();
             endDate = dayjs(base).endOf("month").toDate();
-
         } else if (start_date && end_date) {
-            if (!dayjs(start_date).isValid() || !dayjs(end_date).isValid()) {
+            if (!dayjs(start_date).isValid() || !dayjs(end_date).isValid())
                 throw new BadRequestException(
                     "Invalid start_date or end_date. Expected format: YYYY-MM-DD"
                 );
-            }
-
             startDate = dayjs(start_date).startOf("day").toDate();
             endDate = dayjs(end_date).endOf("day").toDate();
-
         } else {
             const nowIST = dayjs().tz("Asia/Kolkata");
             startDate = nowIST.startOf("month").toDate();
             endDate = nowIST.endOf("month").toDate();
         }
 
-        /* --------------------------------------------------
-           2️⃣ Build Mongo filter (EXPLICIT TYPE)
-        -------------------------------------------------- */
-        const filter = /** @type {Record<string, any>} */ ({
-            created_at: {
-                $gte: startDate,
-                $lte: endDate
-            }
-        });
+        const filter = { created_at: { $gte: startDate, $lte: endDate } };
 
-        if (!ADMIN_PRIVILEGED_ROLES.includes(employeeRole)) {
+        if (!ADMIN_PRIVILEGED_ROLES.includes(employeeRole))
             filter.created_by = employeeId;
-        }
 
-        /* --------------------------------------------------
-           3️⃣ Query
-        -------------------------------------------------- */
-        const orders = await Order
-            .find(filter)
-            .sort({ created_at: -1 });
+        const orders = await Order.find(filter).sort({ created_at: -1 });
 
         if (!orders.length) return [];
 
-        /* --------------------------------------------------
-           4️⃣ Attach dealer & details
-        -------------------------------------------------- */
-        const { dealerMap, detailsMap } =
-            await fetchDealerAndOrderDetails(orders);
+        const { dealerMap, detailsMap } = await fetchDealerAndOrderDetails(orders);
 
-        return orders.map(order =>
+        return orders.map((order) =>
             transformOrderToResponse(
                 order,
                 dealerMap[order.dealer_id],
@@ -602,12 +506,10 @@ const orderService = {
         const nowIST = () => getISTDate();
         const toNumber = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 
-        console.info("[OrderDetail][DTO][Incoming]", {
+        logger.info("[OrderDetail][DTO][Incoming]", {
             dtoKeys: Object.keys(updateDto),
-            dtoValues: updateDto
+            dtoValues: updateDto,
         });
-
-        /* 1️⃣ Fetch Required Entities */
 
         const orderDetail = await OrderDetails.findOne({ order_details_number: orderDetailsId });
         if (!orderDetail) {
@@ -625,8 +527,6 @@ const orderService = {
         if (!product)
             throw new BadRequestException(`No product found for ID: ${orderDetail.product_id}`);
 
-        // 2️⃣ Early Guards
-
         if (orderDetail.status === ORDER_STATUSES.CANCELLED)
             throw new BadRequestException(
                 `Order Detail ${orderDetail.order_details_number} is already CANCELLED`
@@ -637,7 +537,6 @@ const orderService = {
                 `Parent Order ${order.order_number} is CANCELLED`
             );
 
-        // 3️⃣ Stock State Initialization 
         let {
             PACKED: packedQty = 0,
             UNPACKED: unpackedQty = 0,
@@ -843,8 +742,6 @@ const orderService = {
             let deliveredQty = 0;
             let deliveredAt = null;
 
-            /* 1️⃣ Determine Quantity */
-
             if (isMarkAsDelivered) {
                 deliveredQty = remainingDeliverableQty;
             } else if (hasDeliveredQty) {
@@ -860,7 +757,6 @@ const orderService = {
                 }
             }
 
-            /* 2️⃣ Determine Date */
             if (hasDeliveredDate) {
                 deliveredAt = updateDto.delivered_date ?
                     new Date(updateDto.delivered_date) :
@@ -885,25 +781,17 @@ const orderService = {
 
             }
 
-            /* 3️⃣ Apply Quantity Update */
             if (deliveredQty > 0) {
                 orderDetail.qty_delivered += deliveredQty;
-
-                if (!deliveredAt) {
-                    deliveredAt = nowIST();
-                }
-
-                appendNote(
-                    `Delivered ${deliveredQty} unit(s) on ${deliveredAt.toISOString()}`
-                );
+                if (!deliveredAt) deliveredAt = nowIST();
+                appendNote(`Delivered ${deliveredQty} unit(s) on ${deliveredAt.toISOString()}`);
             }
 
             orderDetail.delivery_date = deliveredAt;
         }
 
-        console.log("[OrderDetail][Returns]", returns);
+        logger.info("[OrderDetail][Returns]", returns);
 
-        // 7️⃣ Persist Stock Returns
         if (returns.length > 0) {
             await persistStockReturns({
                 product,
@@ -915,7 +803,6 @@ const orderService = {
             });
         }
 
-        // 8️⃣ Update Stock Flags
         orderDetail.stock_flags = {
             PACKED: packedQty,
             UNPACKED: unpackedQty,
@@ -924,7 +811,6 @@ const orderService = {
             hasProduction: productionQty > 0
         };
 
-        // 9️⃣ Intelligent Status Resolution
         const previousStatus = orderDetail.status;
 
         if (normalizedStatus) {
@@ -963,7 +849,6 @@ const orderService = {
 
         await orderDetail.save();
 
-        // 🔟 Recalculate Parent Order (Optimized)
         const refreshedDetails = await OrderDetails.find({
             order_number: order.order_number
         });
@@ -976,17 +861,60 @@ const orderService = {
             .filter(d => !d.is_free)
             .reduce((sum, d) => sum + toNumber(d.total_dealer_discount), 0);
 
-        order.status = allDetailsDelivered(refreshedDetails) ?
-            ORDER_STATUSES.COMPLETED :
-            deriveOrderStatusFromDetails(refreshedDetails);
+        const prevOrderStatus = order.status;
+        order.status = allDetailsDelivered(refreshedDetails)
+            ? ORDER_STATUSES.COMPLETED
+            : deriveOrderStatusFromDetails(refreshedDetails);
 
         await order.save();
 
-        console.info("[OrderDetail][Status Transition]", {
+        logger.info("[OrderDetail][Status Transition]", {
             orderDetailsNo: orderDetail.order_details_number,
             from: previousStatus,
-            to: orderDetail.status
+            to: orderDetail.status,
         });
+
+        // Notifications for order status changes
+        const newOrderStatus = order.status;
+
+        if (normalizedStatus == ORDER_STATUSES.CONFIRMED) {
+            fireNotification(
+                notifyOrderConfirmed({
+                    order,
+                    confirmedBy: employeeId,
+                    createdBy: order.created_by,
+                })
+            );
+        }
+
+        if (prevOrderStatus !== newOrderStatus && shouldNotifyStatusChange(prevOrderStatus, newOrderStatus)) {
+            switch (newOrderStatus) {
+                case ORDER_STATUSES.CONFIRMED:
+                    fireNotification(
+                        notifyOrderConfirmed({
+                            order,
+                            confirmedBy: employeeId,
+                            createdBy: order.created_by,
+                        })
+                    );
+                    break;
+
+                case ORDER_STATUSES.PRODUCTION:
+                case ORDER_STATUSES.PACKED:
+                    fireNotification(
+                        notifyOrderStatusChanged({
+                            order,
+                            newStatus: newOrderStatus,
+                            changedBy: employeeId,
+                            createdBy: order.created_by,
+                        })
+                    );
+                    break;
+
+                default:
+                    break;
+            }
+        }
 
         return mapOrderDetailEntityToResponse(orderDetail);
     }),
@@ -1010,6 +938,8 @@ const orderService = {
 
         const order = await Order.findByOrderNumber(orderNumber);
         if (!order) throw new BadRequestException(`No order found for: ${orderNumber}`);
+
+        const prevOrderStatus = order.status;
 
         if (priority && priority !== order.priority) order.priority = priority;
 
@@ -1038,9 +968,10 @@ const orderService = {
             if (!order_details.length) {
                 const next = normalizeStatus(status);
                 for (const detail of updatedDetails) {
-                    await orderService.updateOrderDetailStatus(detail.order_details_number, {
-                        status: next
-                    });
+                    await orderService.updateOrderDetailStatus(
+                        detail.order_details_number,
+                        { status: next }
+                    );
                 }
 
                 updatedDetails = await OrderDetails.find({ order_number: orderNumber });
@@ -1066,6 +997,51 @@ const orderService = {
         }
 
         await order.save();
+
+        // Handle order status notifications
+        const newOrderStatus = order.status;
+
+        // Trigger notification when explicitly setting status
+        if (status === ORDER_STATUSES.CONFIRMED) {
+            fireNotification(
+                notifyOrderConfirmed({
+                    order,
+                    confirmedBy: employeeId,
+                    createdBy: order.created_by,
+                })
+            );
+        }
+
+        // Trigger notification only if status actually changed
+        if (prevOrderStatus !== newOrderStatus) {
+            switch (newOrderStatus) {
+                case ORDER_STATUSES.CONFIRMED:
+                    fireNotification(
+                        notifyOrderConfirmed({
+                            order,
+                            confirmedBy: employeeId,
+                            createdBy: order.created_by,
+                        })
+                    );
+                    break;
+
+                case ORDER_STATUSES.PRODUCTION:
+                case ORDER_STATUSES.PACKED:
+                    fireNotification(
+                        notifyOrderStatusChanged({
+                            order,
+                            newStatus: newOrderStatus,
+                            changedBy: employeeId,
+                            createdBy: order.created_by,
+                        })
+                    );
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
         return transformOrderToResponse(order, null, updatedDetails);
     }),
 
@@ -1236,6 +1212,31 @@ const orderService = {
 
         logger.info(`🔄 Order Status Updated — order_number: ${orderNumber} | ${prev} → ${order.status}`);
 
+        // Notifications 
+        if (prev !== order.status) {
+            if (order.status === ORDER_STATUSES.CONFIRMED) {
+                fireNotification(
+                    notifyOrderConfirmed({
+                        order,
+                        confirmedBy: employeeId,
+                        createdBy: order.created_by,
+                    })
+                );
+            } else if (
+                order.status === ORDER_STATUSES.PRODUCTION ||
+                order.status === ORDER_STATUSES.PACKED
+            ) {
+                fireNotification(
+                    notifyOrderStatusChanged({
+                        order,
+                        newStatus: order.status,
+                        changedBy: employeeId,
+                        createdBy: order.created_by,
+                    })
+                );
+            }
+        }
+
         const dealer = await Employee.findOne({ employee_id: order.dealer_id, role: ROLES.DEALER });
         const refreshedDetails = await OrderDetails.find({ order_number: orderNumber });
 
@@ -1285,6 +1286,8 @@ const orderService = {
                 `Order ${order.order_number} is already CANCELLED and cannot be modified.`
             );
         }
+
+        const prevOrderStatus = order.status;
 
         // Fetch employee (optional)
         let employee = null;
