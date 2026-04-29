@@ -1,6 +1,6 @@
 import Employee from "../../models/employees.js";
 import OrderDetails from "../../models/orderDetails.js";
-import { ROLES } from "../../utils/constants.js";
+import { ORDER_STATUSES, ROLES } from "../../utils/constants.js";
 
 export const fetchDealerAndOrderDetails = async (orders = []) => {
     if (!Array.isArray(orders) || orders.length === 0) {
@@ -70,4 +70,19 @@ export const buildDateRange = (startDate, endDate) => {
     }
 
     return range;
+};
+
+// Fire notification as non-blocking operation
+export const fireNotification = (promise) => {
+    promise.catch((err) =>
+        logger.error("[Notification] Non-fatal error:", err.message)
+    );
+};
+
+// Returns true when the status transition should emit a notification.
+export const shouldNotifyStatusChange = (prevStatus, nextStatus) => {
+    if (nextStatus === ORDER_STATUSES.CONFIRMED) return true;
+    if (nextStatus === ORDER_STATUSES.PRODUCTION) return true;
+    if (nextStatus === ORDER_STATUSES.PACKED) return true;
+    return false;
 };
