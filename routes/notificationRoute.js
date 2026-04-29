@@ -10,9 +10,12 @@ router.get("/stream", verifyToken, notificationController.stream);
 
 // REST endpoints
 router.use(verifyToken);
+
 router.get("/", notificationController.getAll);
 router.get("/unread-count", notificationController.getUnreadCount);
 router.get("/health", notificationController.health);
+
+// admin and superadmin only
 router.put("/mark-all-read", notificationController.markAllAsRead);
 router.put("/:notificationId/read", notificationController.markAsRead);
 
