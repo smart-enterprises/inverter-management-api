@@ -16,3 +16,19 @@ export const buildResponse = ({
         })
     });
 };
+
+export const buildEmployeesResponse = ({ data, page, limit, total }) => ({
+    success: true,
+    status: 200,
+    message: "Employees retrieved successfully",
+    data: {
+        employees: data,
+        pagination: page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+    },
+    timestamp: new Date().toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata"
+    })
+});
