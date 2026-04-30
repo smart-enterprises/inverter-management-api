@@ -130,6 +130,24 @@ async function checkIfDiscountExists(
     }
 };
 
+export const mapEmployees = async (employees, includePassword) => {
+    if (!includePassword) {
+        return employees.map(mapEmployeeEntityToResponse);
+    }
+
+    return Promise.all(
+        employees.map(async (emp) => {
+            if (!emp.password) {
+                return mapEmployeeEntityToResponse(emp, null);
+            }
+
+            const decrypted = await revealPassword(emp.password);
+
+            return mapEmployeeEntityToResponse(emp, decrypted);
+        })
+    );
+};
+
 const employeeService = {
     defaultSuperAdminSetup: asyncHandler(async () => {
         if (!SUPER_ADMIN || !SUPER_ADMIN_PHONE || !SUPER_ADMIN_EMAIL || !SUPER_ADMIN_PASSWORD) {

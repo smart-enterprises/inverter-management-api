@@ -3,14 +3,15 @@ import asyncHandler from "express-async-handler";
 import helmet from "helmet";
 
 import employeeSchema from "../models/employees.js";
-import { employeeService } from "../service/employeeService.js";
+import { employeeService, mapEmployees } from "../service/employeeService.js";
 import { BadRequestException } from "../middleware/CustomError.js";
 import logger from "../utils/logger.js";
 
 import { mapEmployeeEntityToResponse } from "../utils/modelMapper.js";
 import { revealPassword } from "../utils/employeeAuth.js";
-import { getAuthenticatedEmployeeContext, sanitizeInputBody, validateMainRoleAccess } from "../utils/validationUtils.js";
+import { buildEmployeeFilter, getAuthenticatedEmployeeContext, getProjection, normalizeQueryParams, sanitizeInputBody, validateMainRoleAccess } from "../utils/validationUtils.js";
 import { ROLES } from "../utils/constants.js";
+import { buildEmployeesResponse, buildResponse } from "../utils/responseUtils.js";
 
 const getPaginationParams = (query) => {
     const page = parseInt(query.page || "1", 10);
@@ -150,130 +151,32 @@ const employeeController = {
     getAllEmployees: [
         asyncHandler(async (req, res) => {
             const { page, limit, skip } = getPaginationParams(req.query);
-            const {
-                role,
-                search,
-                status,
-                includeDealers,
-                includePassword
-            } = req.query;
+            const query = normalizeQueryParams(req.query);
 
             const { employeeRole } = getAuthenticatedEmployeeContext();
 
-            const isAll = (value) =>
-                typeof value === "string" && value.toLowerCase() === "all";
+            const filter = buildEmployeeFilter(query, employeeRole);
+            const projection = getProjection(query.includePassword, employeeRole);
 
-            const parseBoolean = (value) =>
-                String(value).toLowerCase() === "true";
-
-            const filter = {};
-
-            // Status Filter
-            if (status && !isAll(status)) {
-                filter.status = status;
-            } else {
-                filter.status = { $ne: "deleted" };
-            }
-
-            // Dealer Inclusion Control
-            const shouldIncludeDealers = parseBoolean(includeDealers);
-
-            if (!shouldIncludeDealers) {
-                filter.role = { $ne: ROLES.DEALER };
-            }
-
-            // Role Filter (overrides dealer exclusion if explicitly provided)
-            if (role && !isAll(role)) {
-                filter.role = role;
-            }
-
-            // Search Filter
-            if (search) {
-                const regex = { $regex: search, $options: "i" };
-                const isNumericSearch = !isNaN(search);
-
-                const orConditions = [
-                    { employee_id: regex },
-                    { employee_name: regex },
-                    { employee_email: regex },
-                    { role: regex },
-                    { status: regex },
-                    { shop_name: regex },
-                    { district: regex },
-                    { town: regex },
-                    { brand: regex }
-                ];
-
-                // Only add phone if numeric
-                if (isNumericSearch) {
-                    orConditions.push({ employee_phone: Number(search) });
-                }
-
-                filter.$or = orConditions;
-            }
-
-            /* --------------------------------------------------
-               Password Visibility Control
-            -------------------------------------------------- */
-
-            const canViewPasswordByRole = [
-                ROLES.SUPER_ADMIN,
-                ROLES.ADMIN,
-                ROLES.MANAGER
-            ].includes(employeeRole);
-
-            const shouldIncludePassword =
-                canViewPasswordByRole && parseBoolean(includePassword);
-
-            const selectFields = shouldIncludePassword ? "" : "-password";
-
-            //  Execute Query
             const [employees, total] = await Promise.all([
                 employeeSchema
                     .find(filter)
-                    .select(selectFields)
+                    .select(projection.select)
                     .skip(skip)
                     .limit(limit)
-                    .sort({ created_at: -1 }),
-
+                    .sort({ created_at: -1 })
+                    .lean(),
                 employeeSchema.countDocuments(filter)
             ]);
 
-            let mappedEmployees;
+            const mappedEmployees = await mapEmployees(employees, projection.includePassword);
 
-            if (shouldIncludePassword) {
-                mappedEmployees = await Promise.all(
-                    employees.map(async (emp) => {
-                        if (!emp.password) {
-                            throw new BadRequestException(
-                                `Missing password for employee ID: ${emp.employee_id}`
-                            );
-                        }
-
-                        const decryptedPassword = await revealPassword(emp.password);
-
-                        return mapEmployeeEntityToResponse(emp, decryptedPassword);
-                    })
-                );
-            } else {
-                mappedEmployees = employees.map((emp) =>
-                    mapEmployeeEntityToResponse(emp)
-                );
-            }
-
-            res.status(200).json({
-                success: true,
-                status: 200,
-                message: "Employees retrieved successfully",
-                data: {
-                    employees: mappedEmployees,
-                    pagination: page,
-                    limit,
-                    total,
-                    pages: Math.ceil(total / limit)
-                },
-                timestamp: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
-            });
+            return res.status(200).json(buildEmployeesResponse({
+                data: mappedEmployees,
+                page,
+                limit,
+                total
+            }));
         })
     ],
 
