@@ -193,3 +193,95 @@ export const normalizeProductType = (value) => {
 
     return cleaned;
 };
+
+export const normalizeQueryParams = (query) => {
+    const isAll = (val) => typeof val === "string" && val.toLowerCase() === "all";
+    const toBool = (val) => String(val).toLowerCase() === "true";
+
+    return {
+        role: !isAll(query.role) ? query.role : null,
+        status: !isAll(query.status) ? query.status : null,
+        search: query.search?.trim(),
+        includeDealers: toBool(query.includeDealers),
+        includePassword: toBool(query.includePassword)
+    };
+};
+
+export const buildEmployeeFilter = (query, employeeRole) => {
+    const {
+        role: requestedRole,
+        status,
+        search,
+        includeDealers
+    } = query;
+
+    const filter = {};
+
+    filter.status = status || { $ne: "deleted" };
+
+    const restrictedRoles = new Set();
+
+    if (!includeDealers) {
+        restrictedRoles.add(ROLES.DEALER);
+    }
+
+    if (employeeRole === ROLES.MANAGER) {
+        restrictedRoles.add(ROLES.SUPER_ADMIN);
+        restrictedRoles.add(ROLES.ADMIN);
+    }
+
+    if (requestedRole) {
+        if (restrictedRoles.has(requestedRole)) {
+            filter.role = { $in: [] };
+        } else {
+            filter.role = requestedRole;
+        }
+    } else if (restrictedRoles.size > 0) {
+        filter.role = { $nin: Array.from(restrictedRoles) };
+    }
+
+    if (search) {
+        const trimmedSearch = String(search).trim();
+        const regex = new RegExp(trimmedSearch, "i");
+        const isNumeric = !Number.isNaN(Number(trimmedSearch));
+
+        const searchConditions = [
+            { employee_id: regex },
+            { employee_name: regex },
+            { employee_email: regex },
+            { role: regex },
+            { status: regex },
+            { shop_name: regex },
+            { district: regex },
+            { town: regex },
+            { brand: regex }
+        ];
+
+        if (isNumeric) {
+            searchConditions.push({
+                employee_phone: Number(trimmedSearch)
+            });
+        }
+
+        filter.$or = searchConditions;
+    }
+
+    return filter;
+};
+
+export const getProjection = (includePassword, employeeRole) => {
+    const allowedRoles = [
+        ROLES.SUPER_ADMIN,
+        ROLES.ADMIN,
+        ROLES.MANAGER
+    ];
+
+    const canViewPassword = allowedRoles.includes(employeeRole);
+
+    const shouldIncludePassword = canViewPassword && includePassword;
+
+    return {
+        select: shouldIncludePassword ? "" : "-password",
+        includePassword: shouldIncludePassword
+    };
+};

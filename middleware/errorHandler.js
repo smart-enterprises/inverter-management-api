@@ -41,12 +41,12 @@ export const handleRateLimitError = (req, res, next, options) => {
         timeZone: 'Asia/Kolkata'
     });
 
-    logger.warn('Rate limit exceeded', { ip: req.ip, url: req.originalUrl });
-
     let retryAfter = 3600;
     if (options && options.standardHeaders) {
         retryAfter = res.getHeader('Retry-After') || 3600;
     }
+
+    logger.warn('Rate limit exceeded', { ip: req.ip, url: req.originalUrl });
 
     res.status(429).json({
         success: false,

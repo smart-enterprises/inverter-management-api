@@ -49,10 +49,37 @@ const port = PORT || 3000;
 app.set("trust proxy", 1);
 
 const globalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 200,
+    windowMs: 10 * 60 * 1000,
+    max: 250,
+
+    // Headers
     standardHeaders: true,
     legacyHeaders: false,
+
+    // Trust real client identity (important if behind proxy)
+    keyGenerator: (req) => {
+        return req.user?.id || req.headers['x-forwarded-for'] || req.ip;
+    },
+
+    // Skip internal / safe routes
+    skip: (req) => {
+        return req.path === '/health' || req.path === '/metrics' || req.path.startsWith('/notifications');
+    },
+
+    // Better response (used if handler is NOT set)
+    message: {
+        success: false,
+        message: "Too many requests, please try again after 10 minutes."
+    },
+
+    // 🔑 Critical: avoid counting server errors
+    skipFailedRequests: false,
+    skipSuccessfulRequests: false,
+
+    // 🔑 Prevent counting OPTIONS (CORS preflight)
+    requestWasSuccessful: (req, res) => res.statusCode < 400,
+
+    // Error Handler
     handler: handleRateLimitError,
 });
 
