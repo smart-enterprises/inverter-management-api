@@ -4,7 +4,7 @@ import helmet from "helmet";
 
 import employeeSchema from "../models/employees.js";
 import { employeeService, mapEmployees } from "../service/employeeService.js";
-import { BadRequestException } from "../middleware/CustomError.js";
+import { BadRequestException, NotFoundException } from "../middleware/CustomError.js";
 import logger from "../utils/logger.js";
 
 import { mapEmployeeEntityToResponse } from "../utils/modelMapper.js";
@@ -153,9 +153,45 @@ const employeeController = {
             const { page, limit, skip } = getPaginationParams(req.query);
             const query = normalizeQueryParams(req.query);
 
-            const { employeeRole } = getAuthenticatedEmployeeContext();
+            const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
 
-            const filter = buildEmployeeFilter(query, employeeRole);
+            let filter = buildEmployeeFilter(query, employeeRole);
+
+            if (employeeRole === ROLES.SALESMAN && query.role === ROLES.DEALER) {
+                const salesman = await employeeSchema
+                    .findOne({
+                        employee_id: employeeId,
+                        role: ROLES.SALESMAN,
+                        status: "active"
+                    })
+                    .select("dealers")
+                    .lean();
+
+                if (!salesman) {
+                    throw new BadRequestException(`Authenticated salesman not found: ${employeeId}`);
+                }
+
+                const dealerIds = (salesman.dealers || [])
+                    .filter((id) => typeof id === "string" && id.trim())
+                    .map((id) => id.trim());
+
+                if (dealerIds.length === 0) {
+                    return res.status(200).json(
+                        buildEmployeesResponse({
+                            data: [],
+                            page,
+                            limit,
+                            total: 0
+                        })
+                    );
+                }
+
+                filter = {
+                    ...filter,
+                    employee_id: { $in: dealerIds }
+                };
+            }
+
             const projection = getProjection(query.includePassword, employeeRole);
 
             const [employees, total] = await Promise.all([

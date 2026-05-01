@@ -407,6 +407,34 @@ const employeeService = {
             mappedData.brand = validBrandNames;
         }
 
+        const isSalesman =
+            typeof existingEmployee.role === 'string' &&
+            existingEmployee.role.toLowerCase() === ROLES.SALESMAN.toLowerCase();
+
+        if (isSalesman) {
+            const normalizeDealers = (arr = []) =>
+                Array.isArray(arr)
+                    ? arr
+                        .filter((item) => typeof item === "string" && item.trim())
+                        .map((item) => item.trim())
+                    : [];
+
+            const existingDealers = normalizeDealers(existingEmployee.dealers);
+            const incomingDealers = normalizeDealers(mappedData.dealers);
+            const removeDealers = normalizeDealers(updateData.remove_dealers);
+
+            let updatedDealers = [...existingDealers];
+            if (removeDealers.length > 0) {
+                updatedDealers = existingDealers.filter((d) => !removeDealers.includes(d));
+            }
+
+            const mergedDealers = Array.from(
+                new Set([...updatedDealers, ...incomingDealers])
+            );
+
+            mappedData.dealers = mergedDealers;
+        }
+
         mappedData.updated_at = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 
         const updatedEmployee = await employeeSchema.findOneAndUpdate({ employee_id: employeeId },
