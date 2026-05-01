@@ -5,13 +5,13 @@ import { sanitizeInput, toSafeNumber } from './validationUtils.js';
 
 const EMPLOYEE_INPUT_FIELDS = [
     'employee_name', 'employee_email', 'employee_phone', 'role',
-    'shop_name', 'district', 'town', 'brand', 'address', 'photo'
+    'shop_name', 'district', 'town', 'brand', 'dealers', 'address', 'photo'
 ];
 
 const EMPLOYEE_RESPONSE_FIELDS = [
     'employee_id', 'employee_name', 'employee_email', 'employee_phone',
     'role', 'status', 'created_by', 'shop_name', 'photo',
-    'district', 'town', 'brand', 'address', 'created_at', 'updated_at', 'log_note'
+    'district', 'town', 'brand', 'address', 'dealers', 'created_at', 'updated_at', 'log_note'
 ];
 
 const PRODUCT_RESPONSE_FIELDS = [
