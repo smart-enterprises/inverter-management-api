@@ -15,10 +15,6 @@ export const createPriceHistory = async ({
         throw new Error("Invalid price history payload");
     }
 
-    console.log("---------------------------");
-    console.log(product_id, old_price, new_price, changed_by, change_reason, isCostUpdate);
-    console.log("---------------------------");
-
     const priceHistoryId = await generateUniquePriceHistoryId();
 
     const history = await ProductPriceHistory.create({
