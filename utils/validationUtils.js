@@ -2,8 +2,8 @@
 
 import validator from 'validator';
 
-import { BadRequestException, ValidationException, UnauthorizedException, ForbiddenException } from '../middleware/CustomError.js';
-import { ADMIN_PRIVILEGED_ROLES, STOCK_ACTIONS, STOCK_TYPES, ROLES, PRODUCT_REQUIRED_FIELDS, DEALER_DISCOUNT_REQUIRED_FIELDS, ALLOWED_TRANSITIONS, STOCK_MANAGEMENT_ROLES, } from './constants.js';
+import { BadRequestException, ValidationException, ForbiddenException } from '../middleware/CustomError.js';
+import { ADMIN_PRIVILEGED_ROLES, STOCK_ACTIONS, STOCK_TYPES, ROLES, PRODUCT_REQUIRED_FIELDS, DEALER_DISCOUNT_REQUIRED_FIELDS, ALLOWED_TRANSITIONS, STOCK_MANAGEMENT_ROLES, EMPLOYEE_ACCESS_SCOPE, } from './constants.js';
 import { validatePassword } from './employeeAuth.js';
 import { CurrentRequestContext } from '../utils/CurrentRequestContext.js';
 
@@ -194,20 +194,29 @@ export const normalizeProductType = (value) => {
     return cleaned;
 };
 
-export const normalizeQueryParams = (query) => {
-    const isAll = (val) => typeof val === "string" && val.toLowerCase() === "all";
-    const toBool = (val) => String(val).toLowerCase() === "true";
+export const parseEmployeeQueryParams = (query) => {
+    const isAllValue = (value) =>
+        typeof value === "string" && value.toLowerCase() === "all";
+
+    const toBoolean = (value) =>
+        String(value).toLowerCase() === "true";
 
     return {
-        role: !isAll(query.role) ? query.role : null,
-        status: !isAll(query.status) ? query.status : null,
-        search: query.search?.trim(),
-        includeDealers: toBool(query.includeDealers),
-        includePassword: toBool(query.includePassword)
+        role: !isAllValue(query.role) ? query.role : null,
+        status: !isAllValue(query.status) ? query.status : null,
+        searchTerm: query.search?.trim(),
+
+        includeDealers: toBoolean(query.includeDealers),
+        includePassword: toBoolean(query.includePassword),
+
+        accessScope:
+            query.scope?.toUpperCase() === EMPLOYEE_ACCESS_SCOPE.ALL
+                ? EMPLOYEE_ACCESS_SCOPE.ALL
+                : EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY,
     };
 };
 
-export const buildEmployeeFilter = (query, employeeRole) => {
+export const buildEmployeeQueryFilter = (query, employeeRole) => {
     const {
         role: requestedRole,
         status,
@@ -269,7 +278,7 @@ export const buildEmployeeFilter = (query, employeeRole) => {
     return filter;
 };
 
-export const getProjection = (includePassword, employeeRole) => {
+export const buildEmployeeProjectionConfig = (includePassword, employeeRole) => {
     const allowedRoles = [
         ROLES.SUPER_ADMIN,
         ROLES.ADMIN,
