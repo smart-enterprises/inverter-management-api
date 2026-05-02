@@ -3,15 +3,15 @@ import asyncHandler from "express-async-handler";
 import helmet from "helmet";
 
 import employeeSchema from "../models/employees.js";
-import { employeeService, mapEmployees } from "../service/employeeService.js";
-import { BadRequestException, NotFoundException } from "../middleware/CustomError.js";
+import { employeeService, transformEmployeeRecords } from "../service/employeeService.js";
+import { BadRequestException } from "../middleware/CustomError.js";
 import logger from "../utils/logger.js";
 
 import { mapEmployeeEntityToResponse } from "../utils/modelMapper.js";
 import { revealPassword } from "../utils/employeeAuth.js";
-import { buildEmployeeFilter, getAuthenticatedEmployeeContext, getProjection, normalizeQueryParams, sanitizeInputBody, validateMainRoleAccess } from "../utils/validationUtils.js";
-import { ROLES } from "../utils/constants.js";
-import { buildEmployeesResponse, buildResponse } from "../utils/responseUtils.js";
+import { buildEmployeeProjectionConfig, buildEmployeeQueryFilter, getAuthenticatedEmployeeContext, parseEmployeeQueryParams, sanitizeInputBody, validateMainRoleAccess } from "../utils/validationUtils.js";
+import { EMPLOYEE_ACCESS_SCOPE, ROLES } from "../utils/constants.js";
+import { buildEmployeeListResponse } from "../utils/responseUtils.js";
 
 const getPaginationParams = (query) => {
     const page = parseInt(query.page || "1", 10);
@@ -151,69 +151,83 @@ const employeeController = {
     getAllEmployees: [
         asyncHandler(async (req, res) => {
             const { page, limit, skip } = getPaginationParams(req.query);
-            const query = normalizeQueryParams(req.query);
+            const normalizedQuery = parseEmployeeQueryParams(req.query);
 
             const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
 
-            let filter = buildEmployeeFilter(query, employeeRole);
+            let queryFilter = buildEmployeeQueryFilter(normalizedQuery, employeeRole);
 
-            if (employeeRole === ROLES.SALESMAN && query.role === ROLES.DEALER) {
-                const salesman = await employeeSchema
+            console.log(normalizedQuery.accessScope === EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY && employeeRole === ROLES.SALESMAN && normalizedQuery.role === ROLES.DEALER);
+            console.log(normalizedQuery.accessScope);
+
+            if (normalizedQuery.accessScope === EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY && employeeRole === ROLES.SALESMAN && normalizedQuery.role === ROLES.DEALER) {
+                const salesmanRecord = await employeeSchema
                     .findOne({
                         employee_id: employeeId,
                         role: ROLES.SALESMAN,
-                        status: "active"
+                        status: "active",
                     })
                     .select("dealers")
                     .lean();
 
-                if (!salesman) {
-                    throw new BadRequestException(`Authenticated salesman not found: ${employeeId}`);
+                if (!salesmanRecord) {
+                    throw new BadRequestException(
+                        `Authenticated salesman not found: ${employeeId}`
+                    );
                 }
 
-                const dealerIds = (salesman.dealers || [])
+                const assignedDealerIds = (salesmanRecord.dealers || [])
                     .filter((id) => typeof id === "string" && id.trim())
                     .map((id) => id.trim());
 
-                if (dealerIds.length === 0) {
+                if (assignedDealerIds.length === 0) {
                     return res.status(200).json(
-                        buildEmployeesResponse({
+                        buildEmployeeListResponse({
                             data: [],
                             page,
                             limit,
-                            total: 0
+                            total: 0,
                         })
                     );
                 }
 
-                filter = {
-                    ...filter,
-                    employee_id: { $in: dealerIds }
+                queryFilter = {
+                    ...queryFilter,
+                    employee_id: { $in: assignedDealerIds },
                 };
             }
 
-            const projection = getProjection(query.includePassword, employeeRole);
+            const projectionConfig = buildEmployeeProjectionConfig(
+                normalizedQuery.includePassword,
+                employeeRole
+            );
 
-            const [employees, total] = await Promise.all([
+            const [employeeRecords, totalCount] = await Promise.all([
                 employeeSchema
-                    .find(filter)
-                    .select(projection.select)
+                    .find(queryFilter)
+                    .select(projectionConfig.select)
                     .skip(skip)
                     .limit(limit)
                     .sort({ created_at: -1 })
                     .lean(),
-                employeeSchema.countDocuments(filter)
+
+                employeeSchema.countDocuments(queryFilter),
             ]);
 
-            const mappedEmployees = await mapEmployees(employees, projection.includePassword);
+            const transformedEmployees = await transformEmployeeRecords(
+                employeeRecords,
+                projectionConfig.includePassword
+            );
 
-            return res.status(200).json(buildEmployeesResponse({
-                data: mappedEmployees,
-                page,
-                limit,
-                total
-            }));
-        })
+            return res.status(200).json(
+                buildEmployeeListResponse({
+                    data: transformedEmployees,
+                    page,
+                    limit,
+                    total: totalCount,
+                })
+            );
+        }),
     ],
 
     getAllDealerEmployees: [
