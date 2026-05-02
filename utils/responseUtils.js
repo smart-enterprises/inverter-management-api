@@ -17,7 +17,7 @@ export const buildResponse = ({
     });
 };
 
-export const buildEmployeesResponse = ({ data, page, limit, total }) => ({
+export const buildEmployeeListResponse = ({ data, page, limit, total }) => ({
     success: true,
     status: 200,
     message: "Employees retrieved successfully",
