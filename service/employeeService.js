@@ -18,7 +18,7 @@ import {
 } from '../middleware/CustomError.js';
 
 import { getAuthenticatedEmployeeContext, validateDealerDiscountRequiredFields, validateEmployeeData } from '../utils/validationUtils.js';
-import { mapEmployeeRequestToEntity, mapEmployeeEntityToResponse, mapDealerDiscountEntityToResponse, mapProductEntityToResponse } from '../utils/modelMapper.js';
+import { mapEmployeeRequestToEntity, mapEmployeeEntityToResponse, mapDealerDiscountEntityToResponse } from '../utils/modelMapper.js';
 import { hashPassword, generateToken, revealPassword, validatePassword } from '../utils/employeeAuth.js';
 import {
     APPROVAL_GRANTED_ROLES,
@@ -34,7 +34,6 @@ import { tokenBlacklistService } from "./tokenBlacklistService.js";
 import Brand from "../models/brand.js";
 import DealerDiscount from "../models/dealerDiscount.js";
 import Product from "../models/product.js";
-import { filter } from "compression";
 import { fetchProductWithStocks } from "./productService.js";
 
 const checkExistingEmployee = async (email, phone, excludeId = null) => {
@@ -130,7 +129,7 @@ async function checkIfDiscountExists(
     }
 };
 
-export const mapEmployees = async (employees, includePassword) => {
+export const transformEmployeeRecords = async (employees, includePassword) => {
     if (!includePassword) {
         return employees.map(mapEmployeeEntityToResponse);
     }
