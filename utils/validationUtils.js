@@ -201,6 +201,19 @@ export const parseEmployeeQueryParams = (query) => {
     const toBoolean = (value) =>
         String(value).toLowerCase() === "true";
 
+    const parseSalesmanIds = (value) => {
+        if (!value) return [];
+
+        if (Array.isArray(value)) {
+            return value;
+        }
+
+        return String(value)
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean);
+    };
+
     return {
         role: !isAllValue(query.role) ? query.role : null,
         status: !isAllValue(query.status) ? query.status : null,
@@ -213,6 +226,8 @@ export const parseEmployeeQueryParams = (query) => {
             query.scope?.toUpperCase() === EMPLOYEE_ACCESS_SCOPE.ALL
                 ? EMPLOYEE_ACCESS_SCOPE.ALL
                 : EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY,
+
+        salesmanIds: parseSalesmanIds(query.salesmanIds),
     };
 };
 
@@ -221,7 +236,9 @@ export const buildEmployeeQueryFilter = (query, employeeRole) => {
         role: requestedRole,
         status,
         search,
-        includeDealers
+        includeDealers,
+        accessScope,
+        salesmansIds,
     } = query;
 
     const filter = {};
@@ -277,6 +294,26 @@ export const buildEmployeeQueryFilter = (query, employeeRole) => {
 
     return filter;
 };
+
+export function normalizeSalesmanIds(raw) {
+    if (!raw) return [];
+    const ids = Array.isArray(raw) ? raw : [raw];
+    return ids
+        .filter((id) => typeof id === "string" && id.trim().length > 0)
+        .map((id) => id.trim());
+}
+
+export function extractUniqueDealerIds(salesmanRecords) {
+    const seen = new Set();
+    for (const record of salesmanRecords) {
+        for (const dealerId of record.dealers ?? []) {
+            if (typeof dealerId === "string" && dealerId.trim()) {
+                seen.add(dealerId.trim());
+            }
+        }
+    }
+    return [...seen];
+}
 
 export const buildEmployeeProjectionConfig = (includePassword, employeeRole) => {
     const allowedRoles = [
