@@ -217,7 +217,7 @@ export const parseEmployeeQueryParams = (query) => {
     return {
         role: !isAllValue(query.role) ? query.role : null,
         status: !isAllValue(query.status) ? query.status : null,
-        searchTerm: query.search?.trim(),
+        search: query.search?.trim(),
 
         includeDealers: toBoolean(query.includeDealers),
         includePassword: toBoolean(query.includePassword),
