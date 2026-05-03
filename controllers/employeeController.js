@@ -9,7 +9,7 @@ import logger from "../utils/logger.js";
 
 import { mapEmployeeEntityToResponse } from "../utils/modelMapper.js";
 import { revealPassword } from "../utils/employeeAuth.js";
-import { buildEmployeeProjectionConfig, buildEmployeeQueryFilter, getAuthenticatedEmployeeContext, parseEmployeeQueryParams, sanitizeInputBody, validateMainRoleAccess } from "../utils/validationUtils.js";
+import { buildEmployeeProjectionConfig, buildEmployeeQueryFilter, extractUniqueDealerIds, getAuthenticatedEmployeeContext, normalizeSalesmanIds, parseEmployeeQueryParams, sanitizeInputBody, validateMainRoleAccess } from "../utils/validationUtils.js";
 import { EMPLOYEE_ACCESS_SCOPE, ROLES } from "../utils/constants.js";
 import { buildEmployeeListResponse } from "../utils/responseUtils.js";
 
@@ -157,44 +157,62 @@ const employeeController = {
 
             let queryFilter = buildEmployeeQueryFilter(normalizedQuery, employeeRole);
 
-            console.log(normalizedQuery.accessScope === EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY && employeeRole === ROLES.SALESMAN && normalizedQuery.role === ROLES.DEALER);
-            console.log(normalizedQuery.accessScope);
+            const isAssignedOnlyScope = normalizedQuery.accessScope === EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY && normalizedQuery.role === ROLES.DEALER;
 
-            if (normalizedQuery.accessScope === EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY && employeeRole === ROLES.SALESMAN && normalizedQuery.role === ROLES.DEALER) {
-                const salesmanRecord = await employeeSchema
-                    .findOne({
-                        employee_id: employeeId,
-                        role: ROLES.SALESMAN,
-                        status: "active",
-                    })
-                    .select("dealers")
-                    .lean();
-
-                if (!salesmanRecord) {
-                    throw new BadRequestException(
-                        `Authenticated salesman not found: ${employeeId}`
-                    );
-                }
-
-                const assignedDealerIds = (salesmanRecord.dealers || [])
-                    .filter((id) => typeof id === "string" && id.trim())
-                    .map((id) => id.trim());
-
-                if (assignedDealerIds.length === 0) {
-                    return res.status(200).json(
-                        buildEmployeeListResponse({
-                            data: [],
-                            page,
-                            limit,
-                            total: 0,
+            if (isAssignedOnlyScope) {
+                const requestedSalesmanIds = normalizeSalesmanIds(normalizedQuery.salesmanIds);
+                if (requestedSalesmanIds.length > 0) {
+                    const salesmanRecords = await employeeSchema
+                        .find({
+                            employee_id: { $in: requestedSalesmanIds },
+                            role: ROLES.SALESMAN,
+                            status: "active",
                         })
-                    );
+                        .select("employee_id dealers")
+                        .lean();
+
+                    const assignedDealerIds = extractUniqueDealerIds(salesmanRecords);
+
+                    if (assignedDealerIds.length === 0) {
+                        return res.status(200).json(
+                            buildEmployeeListResponse({ data: [], page, limit, total: 0 })
+                        );
+                    }
+
+                    queryFilter = {
+                        ...queryFilter,
+                        employee_id: { $in: assignedDealerIds },
+                    };
+                } else if (employeeRole === ROLES.SALESMAN) {
+                    const salesmanRecord = await employeeSchema
+                        .findOne({
+                            employee_id: employeeId,
+                            role: ROLES.SALESMAN,
+                            status: "active",
+                        })
+                        .select("dealers")
+                        .lean();
+
+                    if (!salesmanRecord) {
+                        throw new BadRequestException(
+                            `Authenticated salesman not found: ${employeeId}`
+                        );
+                    }
+
+                    const assignedDealerIds = extractUniqueDealerIds([salesmanRecord]);
+
+                    if (assignedDealerIds.length === 0) {
+                        return res.status(200).json(
+                            buildEmployeeListResponse({ data: [], page, limit, total: 0 })
+                        );
+                    }
+
+                    queryFilter = {
+                        ...queryFilter,
+                        employee_id: { $in: assignedDealerIds },
+                    };
                 }
 
-                queryFilter = {
-                    ...queryFilter,
-                    employee_id: { $in: assignedDealerIds },
-                };
             }
 
             const projectionConfig = buildEmployeeProjectionConfig(
