@@ -231,7 +231,7 @@ export const parseEmployeeQueryParams = (query) => {
     };
 };
 
-export const buildEmployeeQueryFilter = (query, employeeRole) => {
+export const buildEmployeeQueryFilter = (query, employeeRole, page, limit) => {
     const {
         role: requestedRole,
         status,
@@ -251,7 +251,7 @@ export const buildEmployeeQueryFilter = (query, employeeRole) => {
         restrictedRoles.add(ROLES.DEALER);
     }
 
-    if (employeeRole === ROLES.MANAGER) {
+    if (employeeRole === ROLES.MANAGER && limit < 100) {
         restrictedRoles.add(ROLES.SUPER_ADMIN);
         restrictedRoles.add(ROLES.ADMIN);
     }
