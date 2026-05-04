@@ -155,7 +155,7 @@ const employeeController = {
 
             const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
 
-            let queryFilter = buildEmployeeQueryFilter(normalizedQuery, employeeRole);
+            let queryFilter = buildEmployeeQueryFilter(normalizedQuery, employeeRole, page, limit);
 
             const isAssignedOnlyScope = normalizedQuery.accessScope === EMPLOYEE_ACCESS_SCOPE.ASSIGNED_ONLY && normalizedQuery.role === ROLES.DEALER;
 
