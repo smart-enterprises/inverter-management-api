@@ -1,41 +1,56 @@
 // deviceTokenService.js
 import DeviceToken from "../models/deviceToken.js";
 import { subscribeToTopic, unsubscribeFromTopic } from "../utils/fcmUtils.js";
+import Employee from "../models/employees.js";
 import logger from "../utils/logger.js";
 
-export const registerToken = async (employeeId, token, platform = "android", role = null) => {
-    const doc = await DeviceToken.findOneAndUpdate(
-        { token },
-        {
-            $set: {
-                employee_id: employeeId,
-                platform,
-                is_active: true,
-                last_used_at: new Date(),
+export const registerToken = async (employeeId, token, platform = "web", role) => {
+    try {
+        await DeviceToken.findOneAndUpdate(
+            { token },
+            {
+                $set: {
+                    employee_id: employeeId,
+                    role,
+                    platform,
+                    is_active: true,
+                    last_used_at: getISTDate(),
+                },
             },
-        },
-        { upsert: true, new: true }
-    );
+            { upsert: true, new: true }
+        );
 
-    if (role) {
-        const topic = roleToTopic(role);
-        await subscribeToTopic([token], topic);
-        logger.info(`[DeviceToken] Token subscribed to topic '${topic}' for ${employeeId}`);
+        if (role) {
+            const topic = roleToTopic(role);
+            await subscribeToTopic([token], topic);
+            logger.info(`[DeviceToken] Token subscribed to topic '${topic}' for ${employeeId}`);
+        }
+
+        logger.info(`[DeviceToken] Registered token for employee ${employeeId} (${platform})`);
+        return doc;
+    } catch (err) {
+        logger.error("[DeviceToken] registerToken failed:", err.message);
+        throw err;
     }
-
-    logger.info(`[DeviceToken] Registered token for employee ${employeeId} (${platform})`);
-    return doc;
 };
 
 export const deregisterToken = async (token, role = null) => {
-    const doc = await DeviceToken.findOneAndDelete({ token });
+    try {
+        const doc = await DeviceToken.findOneAndUpdate(
+            { token },
+            { $set: { is_active: false } }
+        );
 
-    if (doc && role) {
-        await unsubscribeFromTopic([token], roleToTopic(role));
+        if (doc && role) {
+            await unsubscribeFromTopic([token], roleToTopic(role));
+        }
+
+        logger.info("[DeviceToken] Token deregistered");
+        return doc;
+    } catch (error) {
+        logger.error("[DeviceToken] DeregisterToken failed:", error.message);
+        throw error;
     }
-
-    logger.info(`[DeviceToken] Deregistered token ...${token.slice(-8)}`);
-    return doc;
 };
 
 export const getTokensForEmployee = async (employeeId) => {
@@ -47,34 +62,43 @@ export const getTokensForEmployee = async (employeeId) => {
 
 export const getTokensForEmployees = async (employeeIds) => {
     if (!employeeIds.length) return [];
-    const docs = await DeviceToken.find({
-        employee_id: { $in: employeeIds },
-        is_active: true,
-    })
-        .select("token")
-        .lean();
-    return docs.map((d) => d.token);
-};
 
-export const deactivateInvalidTokens = async (invalidTokens) => {
-    if (!invalidTokens.length) return;
-    await DeviceToken.updateMany(
-        { token: { $in: invalidTokens } },
-        { $set: { is_active: false } }
-    );
-    logger.info(`[DeviceToken] Deactivated ${invalidTokens.length} invalid FCM token(s)`);
+    try {
+        const docs = await DeviceToken.find({
+            employee_id: { $in: employeeIds },
+            is_active: true,
+        })
+            .select("token platform")
+            .lean();
+        return [...new Set(docs.map((d) => d.token))];
+    } catch (err) {
+        logger.error("[DeviceToken] getTokensForEmployees failed:", err.message);
+        return [];
+    }
 };
 
 export const getTokensForRoles = async (roles) => {
     if (!roles.length) return [];
 
-    const Employee = (await import("../models/employees.js")).default;
     const employees = await Employee.find({ role: { $in: roles } })
         .select("employee_id")
         .lean();
 
     const employeeIds = employees.map((e) => e.employee_id);
     return getTokensForEmployees(employeeIds);
+};
+
+export const deactivateInvalidTokens = async (tokens = []) => {
+    if (!tokens.length) return;
+    try {
+        const result = await DeviceToken.updateMany(
+            { token: { $in: tokens } },
+            { $set: { is_active: false } }
+        );
+        logger.info(`[DeviceToken] Deactivated ${result.modifiedCount} invalid token(s)`);
+    } catch (err) {
+        logger.error("[DeviceToken] deactivateInvalidTokens failed:", err.message);
+    }
 };
 
 export const roleToTopic = (role) =>

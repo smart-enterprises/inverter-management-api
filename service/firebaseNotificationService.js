@@ -1,4 +1,4 @@
-// service/firebaseNotification.service.js
+// service/firebaseNotificationService.js
 import { v4 as uuidv4 } from "uuid";
 import Notification, {
     NOTIFICATION_TYPES,
@@ -65,18 +65,18 @@ const dispatchFcmNotification = async ({
     const allTokens = [...new Set([...roleTokens, ...employeeTokens])];
 
     if (!allTokens.length) {
-        logger.info(`[FCM] No registered tokens found for notification ${notification.notification_id}`);
+        logger.info(`[FCM] No registered tokens for notification ${notification.notification_id}`);
         return { successCount: 0, failureCount: 0 };
     }
 
-    const fcmPayload = {
+    const fcmNotification = {
         title: notification.title,
         body: notification.message,
     };
 
     const { successCount, failureCount, invalidTokens } = await sendToMultipleTokens(
         allTokens,
-        fcmPayload,
+        fcmNotification,
         buildFcmData(notification)
     );
 
@@ -85,8 +85,8 @@ const dispatchFcmNotification = async ({
     }
 
     logger.info(
-        `[FCM] Dispatched '${notification.type}' → ${notification.notification_id} | ` +
-        `Tokens: ${allTokens.length} | Success: ${successCount} | Fail: ${failureCount}`
+        `[FCM] '${notification.type}' → ${notification.notification_id} | ` +
+        `Tokens: ${allTokens.length} | ✅ ${successCount} | ❌ ${failureCount}`
     );
 
     return { successCount, failureCount };
@@ -99,8 +99,10 @@ const resolveDealerDisplay = (dealer) => {
 };
 
 const resolveOrderCreatedType = (orderStatus) => {
-    if (orderStatus === ORDER_STATUSES.PRODUCTION) return NOTIFICATION_TYPES.ORDER_CREATED_PRODUCTION;
-    if (orderStatus === ORDER_STATUSES.PACKED) return NOTIFICATION_TYPES.ORDER_CREATED_PACKED;
+    if (orderStatus === ORDER_STATUSES.PRODUCTION)
+        return NOTIFICATION_TYPES.ORDER_CREATED_PRODUCTION;
+    if (orderStatus === ORDER_STATUSES.PACKED)
+        return NOTIFICATION_TYPES.ORDER_CREATED_PACKED;
     return NOTIFICATION_TYPES.ORDER_CREATED_PENDING;
 };
 
@@ -129,7 +131,13 @@ export const notifyOrderCreated = async ({ order, dealer, createdBy }) => {
                 excludedEmployeeIds: [createdBy],
             });
 
-        await dispatchFcmNotification({ targetRoles, targetEmployeeIds, excludedEmployeeIds, notification });
+        await dispatchFcmNotification({
+            targetRoles,
+            targetEmployeeIds,
+            excludedEmployeeIds,
+            notification,
+        });
+
         return notification;
     } catch (err) {
         logger.error("[FCM] notifyOrderCreated failed:", err);
@@ -156,7 +164,13 @@ export const notifyOrderConfirmed = async ({ order, confirmedBy, createdBy }) =>
                 excludedEmployeeIds: [confirmedBy],
             });
 
-        await dispatchFcmNotification({ targetRoles, targetEmployeeIds, excludedEmployeeIds, notification });
+        await dispatchFcmNotification({
+            targetRoles,
+            targetEmployeeIds,
+            excludedEmployeeIds,
+            notification,
+        });
+
         return notification;
     } catch (err) {
         logger.error("[FCM] notifyOrderConfirmed failed:", err);
@@ -164,14 +178,20 @@ export const notifyOrderConfirmed = async ({ order, confirmedBy, createdBy }) =>
     }
 };
 
-export const notifyOrderStatusChanged = async ({ order, newStatus, changedBy, createdBy }) => {
+export const notifyOrderStatusChanged = async ({
+    order,
+    newStatus,
+    changedBy,
+    createdBy,
+}) => {
     try {
         const type =
             newStatus === ORDER_STATUSES.PACKED
                 ? NOTIFICATION_TYPES.ORDER_STATUS_PACKED
                 : NOTIFICATION_TYPES.ORDER_STATUS_PRODUCTION;
 
-        const statusLabel = newStatus === ORDER_STATUSES.PACKED ? "Packed" : "In Production";
+        const statusLabel =
+            newStatus === ORDER_STATUSES.PACKED ? "Packed" : "In Production";
 
         const { notification, targetRoles, targetEmployeeIds, excludedEmployeeIds } =
             await createNotificationRecord({
@@ -191,7 +211,13 @@ export const notifyOrderStatusChanged = async ({ order, newStatus, changedBy, cr
                 excludedEmployeeIds: [changedBy],
             });
 
-        await dispatchFcmNotification({ targetRoles, targetEmployeeIds, excludedEmployeeIds, notification });
+        await dispatchFcmNotification({
+            targetRoles,
+            targetEmployeeIds,
+            excludedEmployeeIds,
+            notification,
+        });
+
         return notification;
     } catch (err) {
         logger.error("[FCM] notifyOrderStatusChanged failed:", err);
@@ -199,13 +225,42 @@ export const notifyOrderStatusChanged = async ({ order, newStatus, changedBy, cr
     }
 };
 
-export const getNotificationsForEmployee = async (employeeId, role, page = 1, limit = 20) => {
-    const skip = (page - 1) * limit;
+const buildEmployeeNotificationFilter = (employeeId, role) => ({
+    $and: [
+        {
+            $or: [
+                { target_roles: role },
+                { target_roles: { $size: 0 } },
+                { target_employee_ids: employeeId },
+            ],
+        },
+        { excluded_employee_ids: { $ne: employeeId } },
+    ],
+});
 
+const buildUnreadFilter = (employeeId, role) => ({
+    ...buildEmployeeNotificationFilter(employeeId, role),
+    $and: [
+        ...(buildEmployeeNotificationFilter(employeeId, role).$and ?? []),
+        { "read_by.employee_id": { $ne: employeeId } },
+    ],
+});
+
+export const getNotificationsForEmployee = async (
+    employeeId,
+    role,
+    page = 1,
+    limit = 20
+) => {
+    const skip = (page - 1) * limit;
     const filter = buildEmployeeNotificationFilter(employeeId, role);
 
     const [notifications, total] = await Promise.all([
-        Notification.find(filter).sort({ created_at: -1 }).skip(skip).limit(limit).lean(),
+        Notification.find(filter)
+            .sort({ created_at: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
         Notification.countDocuments(filter),
     ]);
 
@@ -218,7 +273,7 @@ export const getNotificationsForEmployee = async (employeeId, role, page = 1, li
 };
 
 export const getUnreadCount = async (employeeId, role) => {
-    const filter = buildEmployeeNotificationFilter(employeeId, role);
+    const filter = buildUnreadFilter(employeeId, role);
     return Notification.countDocuments(filter);
 };
 
@@ -236,26 +291,11 @@ export const markAsRead = async (notificationId, employeeId) => {
 };
 
 export const markAllAsRead = async (employeeId, role) => {
-    const filter = buildEmployeeNotificationFilter(employeeId, role);
-    const unread = await Notification.find(filter, { notification_id: 1 }).lean();
+    const filter = buildUnreadFilter(employeeId, role);
 
-    await Notification.updateMany(filter, {
+    const result = await Notification.updateMany(filter, {
         $push: { read_by: { employee_id: employeeId, read_at: new Date() } },
     });
 
-    return unread.length;
+    return result.modifiedCount ?? 0;
 };
-
-const buildEmployeeNotificationFilter = (employeeId, role) => ({
-    $and: [
-        {
-            $or: [
-                { target_roles: role },
-                { target_roles: { $size: 0 } },
-                { target_employee_ids: employeeId },
-            ],
-        },
-        { excluded_employee_ids: { $ne: employeeId } },
-        { "read_by.employee_id": { $ne: employeeId } },
-    ],
-});

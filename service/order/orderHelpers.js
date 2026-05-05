@@ -1,6 +1,7 @@
 import Employee from "../../models/employees.js";
 import OrderDetails from "../../models/orderDetails.js";
 import { ORDER_STATUSES, ROLES } from "../../utils/constants.js";
+import { NOTIFIABLE_TARGET_STATUSES } from "./orderStatus.js";
 
 export const fetchDealerAndOrderDetails = async (orders = []) => {
     if (!Array.isArray(orders) || orders.length === 0) {
@@ -73,18 +74,13 @@ export const buildDateRange = (startDate, endDate) => {
 };
 
 // fire notification as non-blocking operation
-export const fireNotification = (notificationPromise) => {
-    Promise.resolve(notificationPromise).catch((err) => {
-        logger.error("[Notification] Non-fatal error:", err.message)
-    });
+export const fireNotification = (promise) => {
+    Promise.resolve(promise).catch((err) =>
+        logger.error("[Notification] Background dispatch failed:", err.message)
+    );
 };
 
 // Returns true when the status transition should emit a notification.
 export const shouldNotifyStatusChange = (prevStatus, newStatus) => {
-    const notifiableStatuses = new Set([
-        ORDER_STATUSES.CONFIRMED,
-        ORDER_STATUSES.PRODUCTION,
-        ORDER_STATUSES.PACKED,
-    ]);
-    return prevStatus !== newStatus && notifiableStatuses.has(newStatus);
+    return prevStatus !== newStatus && NOTIFIABLE_TARGET_STATUSES.has(newStatus);
 };
