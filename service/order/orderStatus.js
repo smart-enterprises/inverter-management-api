@@ -178,3 +178,9 @@ export const normalizeIncomingStatus = (dto, orderDetail) => {
 
     return normalized;
 };
+
+export const NOTIFIABLE_TARGET_STATUSES = new Set([
+    ORDER_STATUSES.CONFIRMED,
+    ORDER_STATUSES.PRODUCTION,
+    ORDER_STATUSES.PACKED,
+]);

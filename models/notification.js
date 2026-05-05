@@ -6,7 +6,6 @@ function getISTDate() {
     return new Date(date.getTime() + 330 * 60000);
 }
 
-// order new notification type
 export const NOTIFICATION_TYPES = Object.freeze({
     ORDER_CREATED_PENDING: "ORDER_CREATED_PENDING",
     ORDER_CREATED_PRODUCTION: "ORDER_CREATED_PRODUCTION",
@@ -16,7 +15,6 @@ export const NOTIFICATION_TYPES = Object.freeze({
     ORDER_STATUS_PACKED: "ORDER_STATUS_PACKED",
 });
 
-// order new notification role
 export const NOTIFICATION_ROLES = Object.freeze({
     SUPER_ADMIN: "ROLE_SUPER_ADMIN",
     ADMIN: "ROLE_ADMIN",
@@ -28,13 +26,12 @@ export const NOTIFICATION_ROLES = Object.freeze({
     SALESMAN: "ROLE_SALESMAN",
 });
 
-// order new notification target role
 export const NOTIFICATION_TARGET_ROLES = Object.freeze({
     [NOTIFICATION_TYPES.ORDER_CREATED_PENDING]: [
         NOTIFICATION_ROLES.SUPER_ADMIN,
         NOTIFICATION_ROLES.ADMIN,
         NOTIFICATION_ROLES.MANAGER,
-        // order created by employee_id is appended separately at runtime
+        // The salesman who created the order is added at runtime via targetEmployeeIds
     ],
     [NOTIFICATION_TYPES.ORDER_CREATED_PRODUCTION]: [
         NOTIFICATION_ROLES.SUPER_ADMIN,
@@ -54,7 +51,7 @@ export const NOTIFICATION_TARGET_ROLES = Object.freeze({
         NOTIFICATION_ROLES.SUPER_ADMIN,
         NOTIFICATION_ROLES.ADMIN,
         NOTIFICATION_ROLES.MANAGER,
-        // order created by employee_id is appended separately at runtime
+        // The salesman who created the order is added at runtime via targetEmployeeIds
     ],
     [NOTIFICATION_TYPES.ORDER_STATUS_PRODUCTION]: [
         NOTIFICATION_ROLES.SUPER_ADMIN,
@@ -102,12 +99,10 @@ const notificationSchema = new mongoose.Schema(
             type: [String],
             default: [],
         },
-        // order new notification target employee ids
         target_employee_ids: {
             type: [String],
             default: [],
         },
-        // Specific employees who should be EXCLUDED from receiving notification
         excluded_employee_ids: {
             type: [String],
             default: [],

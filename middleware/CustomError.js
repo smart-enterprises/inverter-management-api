@@ -1,7 +1,4 @@
-/**
- * Base Custom Exception
- * Provides consistent structure for all system errors.
- */
+// CustomError.js
 class CustomException extends Error {
     constructor(message, statusCode = 500, errors = null, code = null) {
         super(message);
@@ -73,17 +70,31 @@ class RateLimitException extends CustomException {
     }
 }
 
-// 503 - Service unavailable
-class ServiceUnavailableException extends CustomException {
-    constructor(message = 'Service temporarily unavailable', code = 'ERR_SERVICE_UNAVAILABLE') {
-        super(message, 503, null, code);
-    }
-}
-
 // 500 - Internal server error
 class InternalServerException extends CustomException {
     constructor(message = 'Internal Server Error', code = 'ERR_INTERNAL') {
         super(message, 500, null, code);
+    }
+}
+
+// 502 – FCM / upstream push error
+class FcmException extends CustomException {
+    constructor(message = "Firebase Cloud Messaging error", code = "ERR_FCM") {
+        super(message, 502, null, code);
+    }
+}
+
+// 400 – invalid or expired FCM / auth token supplied by client
+class TokenException extends CustomException {
+    constructor(message = "Invalid or expired token", code = "ERR_TOKEN") {
+        super(message, 400, null, code);
+    }
+}
+
+// 503 – service unavailable
+class ServiceUnavailableException extends CustomException {
+    constructor(message = "Service temporarily unavailable", code = "ERR_SERVICE_UNAVAILABLE") {
+        super(message, 503, null, code);
     }
 }
 
@@ -97,6 +108,8 @@ export {
     ConflictException,
     ValidationException,
     RateLimitException,
+    InternalServerException,
+    FcmException,
+    TokenException,
     ServiceUnavailableException,
-    InternalServerException
 };

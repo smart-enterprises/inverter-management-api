@@ -1,4 +1,5 @@
-import dotenv from 'dotenv';
+// server.js
+import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
@@ -8,14 +9,15 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import compression from "compression";
 import hpp from "hpp";
-import path from 'path';
-import fs from 'fs';
+import path from "path";
+import fs from "fs";
 import mongoose from "mongoose";
-
-import swaggerUi from 'swagger-ui-express';
+import swaggerUi from "swagger-ui-express";
+import chalk from "chalk";
 
 import logger, { apiLogger } from "./utils/logger.js";
 import { handleRateLimitError, globalErrorHandler } from "./middleware/errorHandler.js";
+import { initializeFirebase } from './config/firebaseConfig.js';
 
 import employeeRoute from "./routes/employeeRoute.js";
 import authRoute from "./routes/authRoute.js";
@@ -32,16 +34,11 @@ import { PATH_ROUTES, APPLICATION_NAME, ENVIRONMENT, PORT, APPLICATION_URL, ALLO
 
 import { NotFoundException } from "./middleware/CustomError.js";
 import { requestContextMiddleware } from "./middleware/requestContextMiddleware.js";
-
 import { connectToDatabase, closeDatabaseConnection } from "./config/dbConfig.js";
 import { employeeService } from "./service/employeeService.js";
 
-import chalk from "chalk";
-
-// Generates a clickable hyperlink in supported terminals
-function hyperlink(text, url) {
-    return `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007`;
-}
+const hyperlink = (text, url) =>
+    `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007`;
 
 const app = express();
 const port = PORT || 3000;
@@ -52,34 +49,24 @@ const globalLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 250,
 
-    // Headers
     standardHeaders: true,
     legacyHeaders: false,
 
-    // Trust real client identity (important if behind proxy)
     keyGenerator: (req) => {
         return req.user?.id || req.headers['x-forwarded-for'] || req.ip;
     },
 
-    // Skip internal / safe routes
     skip: (req) => {
         return req.path === '/health' || req.path === '/metrics' || req.path.startsWith('/notifications');
     },
 
-    // Better response (used if handler is NOT set)
     message: {
         success: false,
         message: "Too many requests, please try again after 10 minutes."
     },
 
-    // 🔑 Critical: avoid counting server errors
-    skipFailedRequests: false,
-    skipSuccessfulRequests: false,
-
-    // 🔑 Prevent counting OPTIONS (CORS preflight)
     requestWasSuccessful: (req, res) => res.statusCode < 400,
 
-    // Error Handler
     handler: handleRateLimitError,
 });
 
@@ -124,9 +111,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// -------------------------------------------------------------
-// Swagger
-// -------------------------------------------------------------
+// swagger
 const swaggerFile = path.resolve("./swagger-output.json");
 if (fs.existsSync(swaggerFile)) {
     const swaggerDocument = JSON.parse(fs.readFileSync(swaggerFile, "utf8"));
@@ -144,13 +129,13 @@ const startServer = async () => {
     try {
         await connectToDatabase();
 
+        initializeFirebase();
+
         const server = app.listen(port, () => {
             employeeService.defaultSuperAdminSetup();
 
-            const url = APPLICATION_URL || `http://localhost:${port}`;
-            const clickableUrl = hyperlink(APPLICATION_NAME, url);
-
-            logger.info(`${chalk.green("🚀 Server running:")} ${chalk.blueBright(clickableUrl)}`);
+            const url = APPLICATION_URL ?? `http://localhost:${port}`;
+            logger.info(`${chalk.green("🚀 Server running:")} ${chalk.blueBright(hyperlink(APPLICATION_NAME, url))}`);
         });
 
         const gracefulShutdown = (signal) => {
@@ -185,26 +170,24 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Health check endpoint
 app.get("/health", async (req, res) => {
-    const state = mongoose.connection && mongoose.connection.readyState ?
-        mongoose.connection.readyState :
-        0;
+    const state = mongoose.connection?.readyState ?? 0;
     const dbStatus = {
         0: "disconnected",
         1: "connected",
         2: "connecting",
-        3: "disconnecting",
-    }[state] || "unknown";
+        3: "disconnecting"
+    }[state] ?? "unknown";
 
     res.status(200).json({
         success: true,
         message: "🩺 Health check OK",
         service: APPLICATION_NAME,
-        environment: ENVIRONMENT || "development",
+        environment: ENVIRONMENT ?? "development",
         version: "1.0.0",
         timestamp: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         db: {
             status: dbStatus,
-            name: mongoose.connection ? mongoose.connection.name || "unknown" : "unknown",
+            name: mongoose.connection?.name ?? "unknown",
         },
     });
 });
@@ -225,7 +208,8 @@ app.use(PATH_ROUTES.BULK_IMPORT_ROUTE, bulkImportRoute);
 
 app.use(PATH_ROUTES.NOTIFICATION_ROUTE, notificationRoute);
 
-app.use((req, res, next) => {
+// 404 catch-all
+app.use((req, _res, next) => {
     next(new NotFoundException(`Endpoint '${req.method} ${req.originalUrl}' not found.`));
 });
 
@@ -233,8 +217,8 @@ app.use(globalErrorHandler);
 
 startServer();
 
-process.on("unhandledRejection", reason => {
-    if (reason && reason.isOperational) {
+process.on("unhandledRejection", (reason) => {
+    if (reason?.isOperational) {
         logger.warn(`Operational rejection: ${reason.message}`);
     } else {
         logger.error("Unhandled Rejection:", reason);
@@ -242,7 +226,7 @@ process.on("unhandledRejection", reason => {
     }
 });
 
-process.on("uncaughtException", err => {
+process.on("uncaughtException", (err) => {
     logger.error("Uncaught Exception:", err);
     process.exit(1);
 });

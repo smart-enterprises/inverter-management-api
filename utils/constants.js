@@ -65,6 +65,10 @@ export const {
     S3_BUCKET_NAME,
     ALLOWED_ORIGINS,
     LOG_LEVEL,
+    FIREBASE_PROJECT_ID,
+    FIREBASE_CLIENT_EMAIL,
+    FIREBASE_PRIVATE_KEY,
+    FIREBASE_SERVICE_ACCOUNT_PATH,
 } = process.env;
 
 export const ROLES = {
