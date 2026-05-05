@@ -24,8 +24,8 @@ import { allDetailsDelivered, canMoveOrderToTargetStatus, deriveOrderStatusFromD
 import { validateOrderCreator, validateOrderDTO } from "./orderValidation.js";
 import { persistStockReturns, returnStockForDetail } from "./orderStock.js";
 import { buildDateRange, fetchDealerAndOrderDetails } from "./orderHelpers.js";
-import { notifyOrderConfirmed, notifyOrderCreated, notifyOrderStatusChanged } from "../notificationService.js";
 import { fireNotification, shouldNotifyStatusChange } from "./orderHelpers.js";
+import { notifyOrderConfirmed, notifyOrderCreated, notifyOrderStatusChanged } from "../firebaseNotificationService.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);

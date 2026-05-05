@@ -1,22 +1,19 @@
 // routes/notificationRoute.js
 import express from "express";
 import { verifyToken } from "../middleware/verifyToken.js";
-import notificationController from "../controllers/notificationController.js";
+import firebaseNotificationController from "../controllers/firebaseNotificationController.js";
 
 const router = express.Router();
 
-// SSE stream
-router.get("/stream", verifyToken, notificationController.stream);
-
-// REST endpoints
 router.use(verifyToken);
 
-router.get("/", notificationController.getAll);
-router.get("/unread-count", notificationController.getUnreadCount);
-router.get("/health", notificationController.health);
+router.post("/register-token", firebaseNotificationController.registerToken);
+router.put("/deregister-token", firebaseNotificationController.deregisterToken);
 
-// admin and superadmin only
-router.put("/mark-all-read", notificationController.markAllAsRead);
-router.put("/:notificationId/read", notificationController.markAsRead);
+router.get("/", firebaseNotificationController.getAll);
+router.get("/unread-count", firebaseNotificationController.getUnreadCount);
+
+router.put("/:notificationId/read", firebaseNotificationController.markAsRead);
+router.put("/mark-all-read", firebaseNotificationController.markAllAsRead);
 
 export default router;
