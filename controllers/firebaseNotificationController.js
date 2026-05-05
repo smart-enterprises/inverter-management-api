@@ -25,9 +25,9 @@ const firebaseNotificationController = {
             throw new BadRequestException("FCM token is required");
         }
 
-        await registerToken(employeeId, token, platform ?? "android", employeeRole);
+        await registerToken(employeeId, token.trim(), platform ?? "web", employeeRole);
 
-        logger.info(`[FCM] Token registered for employee ${employeeId}`);
+        logger.info(`[FCM] Token registered — employee: ${employeeId} | platform: ${platform ?? "web"}`);
 
         return res.status(200).json({
             success: true,
@@ -40,11 +40,11 @@ const firebaseNotificationController = {
         const { employeeRole } = getAuthenticatedEmployeeContext();
         const { token } = req.body;
 
-        if (!token || typeof token !== "string") {
-            throw new BadRequestException("FCM token is required");
+        if (!token || typeof token !== "string" || !token.trim()) {
+            throw new BadRequestException("FCM token is required and must be a non-empty string");
         }
 
-        await deregisterToken(token, employeeRole);
+        await deregisterToken(token.trim(), employeeRole);
 
         return res.status(200).json({
             success: true,
