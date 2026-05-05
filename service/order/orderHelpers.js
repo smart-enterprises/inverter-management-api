@@ -72,17 +72,19 @@ export const buildDateRange = (startDate, endDate) => {
     return range;
 };
 
-// Fire notification as non-blocking operation
-export const fireNotification = (promise) => {
-    promise.catch((err) =>
+// fire notification as non-blocking operation
+export const fireNotification = (notificationPromise) => {
+    Promise.resolve(notificationPromise).catch((err) => {
         logger.error("[Notification] Non-fatal error:", err.message)
-    );
+    });
 };
 
 // Returns true when the status transition should emit a notification.
-export const shouldNotifyStatusChange = (prevStatus, nextStatus) => {
-    if (nextStatus === ORDER_STATUSES.CONFIRMED) return true;
-    if (nextStatus === ORDER_STATUSES.PRODUCTION) return true;
-    if (nextStatus === ORDER_STATUSES.PACKED) return true;
-    return false;
+export const shouldNotifyStatusChange = (prevStatus, newStatus) => {
+    const notifiableStatuses = new Set([
+        ORDER_STATUSES.CONFIRMED,
+        ORDER_STATUSES.PRODUCTION,
+        ORDER_STATUSES.PACKED,
+    ]);
+    return prevStatus !== newStatus && notifiableStatuses.has(newStatus);
 };
