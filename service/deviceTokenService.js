@@ -3,10 +3,11 @@ import DeviceToken from "../models/deviceToken.js";
 import { subscribeToTopic, unsubscribeFromTopic } from "../utils/fcmUtils.js";
 import Employee from "../models/employees.js";
 import logger from "../utils/logger.js";
+import { getISTDate } from "../utils/constants.js";
 
 export const registerToken = async (employeeId, token, platform = "web", role) => {
     try {
-        await DeviceToken.findOneAndUpdate(
+        const doc = await DeviceToken.findOneAndUpdate(
             { token },
             {
                 $set: {

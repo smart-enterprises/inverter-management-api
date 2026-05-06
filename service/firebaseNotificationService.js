@@ -25,6 +25,8 @@ const createNotificationRecord = async ({
     const notificationId = `NOTIF-${uuidv4().split("-")[0].toUpperCase()}`;
     const targetRoles = NOTIFICATION_TARGET_ROLES[type] ?? [];
 
+    logger.debug(`[FCM] createNotificationRecord | type=${type} | targetRoles=${JSON.stringify(targetRoles)}`);
+
     const notification = await Notification.create({
         notification_id: notificationId,
         type,
@@ -55,17 +57,38 @@ const dispatchFcmNotification = async ({
     excludedEmployeeIds,
     notification,
 }) => {
-    const excludedSet = new Set(excludedEmployeeIds);
+    const excludedSet = new Set((excludedEmployeeIds ?? []).map((id) => id?.toString()));
+
+    logger.debug(
+        `[FCM] dispatchFcmNotification | roles=${JSON.stringify(targetRoles)} | ` +
+        `targetEmployees=${JSON.stringify(targetEmployeeIds)} | ` +
+        `excluded=${JSON.stringify([...excludedSet])}`
+    );
 
     const roleTokens = await getTokensForRoles(targetRoles);
 
-    const filteredEmployeeIds = targetEmployeeIds.filter((id) => !excludedSet.has(id));
+    const filteredEmployeeIds = (targetEmployeeIds ?? [])
+        .map((id) => id?.toString())
+        .filter((id) => !excludedSet.has(id));
+
     const employeeTokens = await getTokensForEmployees(filteredEmployeeIds);
+    logger.debug(
+        `[FCM] Token query results | ` +
+        `roleTokens=${roleTokens.length} | employeeTokens=${employeeTokens.length}`
+    );
 
     const allTokens = [...new Set([...roleTokens, ...employeeTokens])];
 
     if (!allTokens.length) {
         logger.info(`[FCM] No registered tokens for notification ${notification.notification_id}`);
+
+        logger.warn(
+            `[FCM] No registered tokens for notification ${notification.notification_id}. ` +
+            `Queried roles: ${JSON.stringify(targetRoles)}. ` +
+            `This usually means: (1) no devices have registered tokens for these roles, ` +
+            `(2) NOTIFICATION_TARGET_ROLES is missing an entry for type="${notification.type}", ` +
+            `or (3) the role strings in device_tokens don't match NOTIFICATION_TARGET_ROLES values.`
+        );
         return { successCount: 0, failureCount: 0 };
     }
 
