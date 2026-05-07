@@ -25,7 +25,7 @@ const createNotificationRecord = async ({
     const notificationId = `NOTIF-${uuidv4().split("-")[0].toUpperCase()}`;
     const targetRoles = NOTIFICATION_TARGET_ROLES[type] ?? [];
 
-    logger.debug(`[FCM] createNotificationRecord | type=${type} | targetRoles=${JSON.stringify(targetRoles)}`);
+    logger.debug(`[FCM] createNotificationRecord | type=${type} | targetRoles=${JSON.stringify(targetRoles)} | targetEmployees=${JSON.stringify(targetEmployeeIds)} | excluded=${JSON.stringify(excludedEmployeeIds)}`);
 
     const notification = await Notification.create({
         notification_id: notificationId,
@@ -57,10 +57,15 @@ const dispatchFcmNotification = async ({
     excludedEmployeeIds,
     notification,
 }) => {
-    const excludedSet = new Set((excludedEmployeeIds ?? []).map((id) => id?.toString()));
+    const excludedSet = new Set(
+        (excludedEmployeeIds ?? [])
+            .filter(Boolean)
+            .map((id) => String(id))
+    );
 
     logger.debug(
-        `[FCM] dispatchFcmNotification | roles=${JSON.stringify(targetRoles)} | ` +
+        `[FCM] dispatchFcmNotification | ` +
+        `roles=${JSON.stringify(targetRoles)} | ` +
         `targetEmployees=${JSON.stringify(targetEmployeeIds)} | ` +
         `excluded=${JSON.stringify([...excludedSet])}`
     );
@@ -68,29 +73,30 @@ const dispatchFcmNotification = async ({
     const roleTokens = await getTokensForRoles(targetRoles);
 
     const filteredEmployeeIds = (targetEmployeeIds ?? [])
-        .map((id) => id?.toString())
+        .filter(Boolean)
+        .map((id) => String(id))
         .filter((id) => !excludedSet.has(id));
 
     const employeeTokens = await getTokensForEmployees(filteredEmployeeIds);
+
     logger.debug(
-        `[FCM] Token query results | ` +
-        `roleTokens=${roleTokens.length} | employeeTokens=${employeeTokens.length}`
+        `[FCM] Token counts | roleTokens=${roleTokens.length} | employeeTokens=${employeeTokens.length}`
     );
 
     const allTokens = [...new Set([...roleTokens, ...employeeTokens])];
 
     if (!allTokens.length) {
-        logger.info(`[FCM] No registered tokens for notification ${notification.notification_id}`);
-
         logger.warn(
             `[FCM] No registered tokens for notification ${notification.notification_id}. ` +
             `Queried roles: ${JSON.stringify(targetRoles)}. ` +
-            `This usually means: (1) no devices have registered tokens for these roles, ` +
-            `(2) NOTIFICATION_TARGET_ROLES is missing an entry for type="${notification.type}", ` +
-            `or (3) the role strings in device_tokens don't match NOTIFICATION_TARGET_ROLES values.`
+            `Possible causes: (1) no devices registered for these roles, ` +
+            `(2) NOTIFICATION_TARGET_ROLES missing entry for type="${notification.type}", ` +
+            `(3) role strings mismatch between device_tokens and NOTIFICATION_TARGET_ROLES.`
         );
         return { successCount: 0, failureCount: 0 };
     }
+
+    logger.info(`[FCM] Dispatching to ${allTokens.length} token(s) for notification ${notification.notification_id}`);
 
     const fcmNotification = {
         title: notification.title,
@@ -104,12 +110,13 @@ const dispatchFcmNotification = async ({
     );
 
     if (invalidTokens.length) {
+        logger.warn(`[FCM] Deactivating ${invalidTokens.length} invalid token(s)`);
         await deactivateInvalidTokens(invalidTokens);
     }
 
     logger.info(
         `[FCM] '${notification.type}' → ${notification.notification_id} | ` +
-        `Tokens: ${allTokens.length} | ✅ ${successCount} | ❌ ${failureCount}`
+        `Total tokens: ${allTokens.length} | ✅ ${successCount} | ❌ ${failureCount}`
     );
 
     return { successCount, failureCount };
@@ -151,6 +158,7 @@ export const notifyOrderCreated = async ({ order, dealer, createdBy }) => {
                     order_status: order.status,
                 },
                 createdBy,
+                targetEmployeeIds: [],
                 excludedEmployeeIds: [createdBy],
             });
 
@@ -163,7 +171,7 @@ export const notifyOrderCreated = async ({ order, dealer, createdBy }) => {
 
         return notification;
     } catch (err) {
-        logger.error("[FCM] notifyOrderCreated failed:", err);
+        logger.error("[FCM] notifyOrderCreated failed:", err.message);
         return null;
     }
 };
@@ -173,7 +181,7 @@ export const notifyOrderConfirmed = async ({ order, confirmedBy, createdBy }) =>
         const { notification, targetRoles, targetEmployeeIds, excludedEmployeeIds } =
             await createNotificationRecord({
                 type: NOTIFICATION_TYPES.ORDER_CONFIRMED,
-                title: "Order Confirmed",
+                title: "Order Confirmed ✅",
                 message: `Order #${order.order_number} has been confirmed`,
                 payload: {
                     order_number: order.order_number,
@@ -183,7 +191,7 @@ export const notifyOrderConfirmed = async ({ order, confirmedBy, createdBy }) =>
                     order_status: order.status,
                 },
                 createdBy: confirmedBy,
-                targetEmployeeIds: [createdBy],
+                targetEmployeeIds: [createdBy].filter(Boolean),
                 excludedEmployeeIds: [confirmedBy],
             });
 
@@ -196,7 +204,7 @@ export const notifyOrderConfirmed = async ({ order, confirmedBy, createdBy }) =>
 
         return notification;
     } catch (err) {
-        logger.error("[FCM] notifyOrderConfirmed failed:", err);
+        logger.error("[FCM] notifyOrderConfirmed failed:", err.message);
         return null;
     }
 };
@@ -230,7 +238,7 @@ export const notifyOrderStatusChanged = async ({
                     order_status: newStatus,
                 },
                 createdBy: changedBy,
-                targetEmployeeIds: [createdBy],
+                targetEmployeeIds: [createdBy].filter(Boolean),
                 excludedEmployeeIds: [changedBy],
             });
 
@@ -243,7 +251,7 @@ export const notifyOrderStatusChanged = async ({
 
         return notification;
     } catch (err) {
-        logger.error("[FCM] notifyOrderStatusChanged failed:", err);
+        logger.error("[FCM] notifyOrderStatusChanged failed:", err.message);
         return null;
     }
 };
@@ -261,13 +269,15 @@ const buildEmployeeNotificationFilter = (employeeId, role) => ({
     ],
 });
 
-const buildUnreadFilter = (employeeId, role) => ({
-    ...buildEmployeeNotificationFilter(employeeId, role),
-    $and: [
-        ...(buildEmployeeNotificationFilter(employeeId, role).$and ?? []),
-        { "read_by.employee_id": { $ne: employeeId } },
-    ],
-});
+const buildUnreadFilter = (employeeId, role) => {
+    const baseFilter = buildEmployeeNotificationFilter(employeeId, role);
+    return {
+        $and: [
+            ...baseFilter.$and,
+            { "read_by.employee_id": { $ne: employeeId } },
+        ],
+    };
+};
 
 export const getNotificationsForEmployee = async (
     employeeId,
