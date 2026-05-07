@@ -46,18 +46,24 @@ const port = PORT || 3000;
 app.set("trust proxy", 1);
 
 const globalLimiter = rateLimit({
-    windowMs: 10 * 60 * 1000,
-    max: 250,
+    windowMs: 1 * 60 * 1000,    // 1 minute
+    max: 500,                   // 500 requests per minute
 
     standardHeaders: true,
     legacyHeaders: false,
 
-    keyGenerator: (req) => {
-        return req.user?.id || req.headers['x-forwarded-for'] || req.ip;
-    },
+    keyGenerator: (req) =>
+        req.user?.id || req.headers["x-forwarded-for"] || req.ip,
 
     skip: (req) => {
-        return req.path === '/health' || req.path === '/metrics' || req.path.startsWith('/notifications');
+        const p = req.path;
+        return (
+            p === "/health" ||
+            p === "/metrics" ||
+            p === "/favicon.ico" ||
+            p.startsWith(PATH_ROUTES.NOTIFICATION_ROUTE) ||
+            p === `${PATH_ROUTES.AUTH_ROUTE}/token/active`
+        );
     },
 
     message: {
@@ -67,6 +73,44 @@ const globalLimiter = rateLimit({
 
     requestWasSuccessful: (req, res) => res.statusCode < 400,
 
+    handler: handleRateLimitError,
+});
+
+const notificationLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,    // 1 minute window
+    max: 120,                   // 120 req/min per IP (2/sec sustained)
+
+    standardHeaders: true,
+    legacyHeaders: false,
+
+    keyGenerator: (req) =>
+        req.user?.id || req.headers["x-forwarded-for"] || req.ip,
+
+    skip: (req) => req.path.startsWith("/sse"),
+
+    message: {
+        success: false,
+        message: "Too many notification requests. Slow down.",
+    },
+
+    requestWasSuccessful: (req, res) => res.statusCode < 400,
+    handler: handleRateLimitError,
+});
+
+const authLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,    // 1 minute window
+    max: 5,                     // 5 requests per minute (login + refresh + verify, safely above peaks)
+
+    standardHeaders: true,
+    legacyHeaders: false,
+
+    keyGenerator: (req) =>
+        req.user?.id || req.headers["x-forwarded-for"] || req.ip,
+
+    message: {
+        success: false,
+        message: "Too many auth requests. Please try again later.",
+    },
     handler: handleRateLimitError,
 });
 
@@ -103,7 +147,9 @@ app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 app.use(cookieParser());
 app.use(compression());
 app.use(hpp());
+
 app.use(globalLimiter);
+
 app.use(requestContextMiddleware);
 
 app.use((req, res, next) => {
@@ -124,35 +170,6 @@ if (missingEnvVars.length > 0) {
     logger.error("Missing required environment variables", { missingEnvVars });
     process.exit(1);
 }
-
-const startServer = async () => {
-    try {
-        await connectToDatabase();
-
-        initializeFirebase();
-
-        const server = app.listen(port, () => {
-            employeeService.defaultSuperAdminSetup();
-
-            const url = APPLICATION_URL ?? `http://localhost:${port}`;
-            logger.info(`${chalk.green("🚀 Server running:")} ${chalk.blueBright(hyperlink(APPLICATION_NAME, url))}`);
-        });
-
-        const gracefulShutdown = (signal) => {
-            logger.info(`Received ${signal}. Shutting down gracefully...`);
-            server.close(async () => {
-                await closeDatabaseConnection();
-                process.exit(0);
-            });
-        };
-
-        process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-        process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-    } catch (error) {
-        logger.error('Error starting server:', error);
-        process.exit(1);
-    }
-};
 
 // Routes
 app.get("/", (req, res) => {
@@ -215,8 +232,39 @@ app.use((req, _res, next) => {
 
 app.use(globalErrorHandler);
 
+// SERVER START
+const startServer = async () => {
+    try {
+        await connectToDatabase();
+
+        initializeFirebase();
+
+        const server = app.listen(port, () => {
+            employeeService.defaultSuperAdminSetup();
+
+            const url = APPLICATION_URL ?? `http://localhost:${port}`;
+            logger.info(`${chalk.green("🚀 Server running:")} ${chalk.blueBright(hyperlink(APPLICATION_NAME, url))}`);
+        });
+
+        const gracefulShutdown = (signal) => {
+            logger.info(`Received ${signal}. Shutting down gracefully...`);
+            server.close(async () => {
+                await closeDatabaseConnection();
+                process.exit(0);
+            });
+        };
+
+        process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+        process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+    } catch (error) {
+        logger.error('Error starting server:', error);
+        process.exit(1);
+    }
+};
+
 startServer();
 
+// PROCESS ERROR GUARDS
 process.on("unhandledRejection", (reason) => {
     if (reason?.isOperational) {
         logger.warn(`Operational rejection: ${reason.message}`);
