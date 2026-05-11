@@ -17,7 +17,7 @@ import chalk from "chalk";
 
 import logger, { apiLogger } from "./utils/logger.js";
 import { handleRateLimitError, globalErrorHandler } from "./middleware/errorHandler.js";
-import { initializeFirebase } from './config/firebaseConfig.js';
+// import { initializeFirebase } from './config/firebaseConfig.js';
 
 import employeeRoute from "./routes/employeeRoute.js";
 import authRoute from "./routes/authRoute.js";
@@ -28,7 +28,7 @@ import locationRoute from "./routes/locationRoute.js";
 import companyRoute from "./routes/companyAddressRoute.js";
 import invoiceRoute from "./routes/invoiceRoute.js";
 import bulkImportRoute from "./routes/bulkImportRoute.js";
-import notificationRoute from "./routes/notificationRoute.js";
+// import notificationRoute from "./routes/notificationRoute.js";
 
 import { PATH_ROUTES, APPLICATION_NAME, ENVIRONMENT, PORT, APPLICATION_URL, ALLOWED_ORIGINS } from "./utils/constants.js";
 
@@ -223,7 +223,7 @@ app.use(PATH_ROUTES.COMPANY_ROUTE, companyRoute);
 
 app.use(PATH_ROUTES.BULK_IMPORT_ROUTE, bulkImportRoute);
 
-app.use(PATH_ROUTES.NOTIFICATION_ROUTE, notificationRoute);
+// app.use(PATH_ROUTES.NOTIFICATION_ROUTE, notificationRoute);
 
 // 404 catch-all
 app.use((req, _res, next) => {
@@ -237,7 +237,7 @@ const startServer = async () => {
     try {
         await connectToDatabase();
 
-        initializeFirebase();
+        // initializeFirebase();
 
         const server = app.listen(port, () => {
             employeeService.defaultSuperAdminSetup();
