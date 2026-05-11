@@ -24,8 +24,7 @@ import { allDetailsDelivered, canMoveOrderToTargetStatus, deriveOrderStatusFromD
 import { validateOrderCreator, validateOrderDTO } from "./orderValidation.js";
 import { persistStockReturns, returnStockForDetail } from "./orderStock.js";
 import { buildDateRange, fetchDealerAndOrderDetails } from "./orderHelpers.js";
-import { fireNotification, shouldNotifyStatusChange } from "./orderHelpers.js";
-import { notifyOrderConfirmed, notifyOrderCreated, notifyOrderStatusChanged } from "../firebaseNotificationService.js";
+import { notificationService } from "../notification/notificationService.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -268,14 +267,17 @@ const orderService = {
 
         logger.info(`✅ Order created — #${orderNumber} | Items: ${orderDetailsList.length}`);
 
-        // ── Notification: Order Created (non-blocking)
-        fireNotification(
-            notifyOrderCreated({
-                order: { ...order.toObject(), order_details: orderDetailsList },
-                dealer,
-                createdBy: employeeId,
-            })
-        );
+        const salesman = await Employee.findOne({
+            employee_id: order.salesman_id || employeeId,
+            status: "active",
+        }).lean();
+
+        notificationService.sendOrderCreatedAsync({
+            order,
+            dealer,
+            salesman,
+            triggeredBy: employeeId,
+        });
 
         return transformOrderToResponse(order, dealer, orderDetailsList);
     }),
@@ -877,44 +879,44 @@ const orderService = {
         // Notifications for order status changes
         const newOrderStatus = order.status;
 
-        if (normalizedStatus == ORDER_STATUSES.CONFIRMED) {
-            fireNotification(
-                notifyOrderConfirmed({
-                    order,
-                    confirmedBy: employeeId,
-                    createdBy: order.created_by,
-                })
-            );
-        }
+        // if (normalizedStatus == ORDER_STATUSES.CONFIRMED) {
+        //     fireNotification(
+        //         notifyOrderConfirmed({
+        //             order,
+        //             confirmedBy: employeeId,
+        //             createdBy: order.created_by,
+        //         })
+        //     );
+        // }
 
-        if (prevOrderStatus !== newOrderStatus && shouldNotifyStatusChange(prevOrderStatus, newOrderStatus)) {
-            switch (newOrderStatus) {
-                case ORDER_STATUSES.CONFIRMED:
-                    fireNotification(
-                        notifyOrderConfirmed({
-                            order,
-                            confirmedBy: employeeId,
-                            createdBy: order.created_by,
-                        })
-                    );
-                    break;
+        // if (prevOrderStatus !== newOrderStatus && shouldNotifyStatusChange(prevOrderStatus, newOrderStatus)) {
+        //     switch (newOrderStatus) {
+        //         case ORDER_STATUSES.CONFIRMED:
+        //             fireNotification(
+        //                 notifyOrderConfirmed({
+        //                     order,
+        //                     confirmedBy: employeeId,
+        //                     createdBy: order.created_by,
+        //                 })
+        //             );
+        //             break;
 
-                case ORDER_STATUSES.PRODUCTION:
-                case ORDER_STATUSES.PACKED:
-                    fireNotification(
-                        notifyOrderStatusChanged({
-                            order,
-                            newStatus: newOrderStatus,
-                            changedBy: employeeId,
-                            createdBy: order.created_by,
-                        })
-                    );
-                    break;
+        //         case ORDER_STATUSES.PRODUCTION:
+        //         case ORDER_STATUSES.PACKED:
+        //             fireNotification(
+        //                 notifyOrderStatusChanged({
+        //                     order,
+        //                     newStatus: newOrderStatus,
+        //                     changedBy: employeeId,
+        //                     createdBy: order.created_by,
+        //                 })
+        //             );
+        //             break;
 
-                default:
-                    break;
-            }
-        }
+        //         default:
+        //             break;
+        //     }
+        // }
 
         return mapOrderDetailEntityToResponse(orderDetail);
     }),
@@ -1001,46 +1003,46 @@ const orderService = {
         // Handle order status notifications
         const newOrderStatus = order.status;
 
-        // Trigger notification when explicitly setting status
-        if (status === ORDER_STATUSES.CONFIRMED) {
-            fireNotification(
-                notifyOrderConfirmed({
-                    order,
-                    confirmedBy: employeeId,
-                    createdBy: order.created_by,
-                })
-            );
-        }
+        // // Trigger notification when explicitly setting status
+        // if (status === ORDER_STATUSES.CONFIRMED) {
+        //     fireNotification(
+        //         notifyOrderConfirmed({
+        //             order,
+        //             confirmedBy: employeeId,
+        //             createdBy: order.created_by,
+        //         })
+        //     );
+        // }
 
-        // Trigger notification only if status actually changed
-        if (prevOrderStatus !== newOrderStatus) {
-            switch (newOrderStatus) {
-                case ORDER_STATUSES.CONFIRMED:
-                    fireNotification(
-                        notifyOrderConfirmed({
-                            order,
-                            confirmedBy: employeeId,
-                            createdBy: order.created_by,
-                        })
-                    );
-                    break;
+        // // Trigger notification only if status actually changed
+        // if (prevOrderStatus !== newOrderStatus) {
+        //     switch (newOrderStatus) {
+        //         case ORDER_STATUSES.CONFIRMED:
+        //             fireNotification(
+        //                 notifyOrderConfirmed({
+        //                     order,
+        //                     confirmedBy: employeeId,
+        //                     createdBy: order.created_by,
+        //                 })
+        //             );
+        //             break;
 
-                case ORDER_STATUSES.PRODUCTION:
-                case ORDER_STATUSES.PACKED:
-                    fireNotification(
-                        notifyOrderStatusChanged({
-                            order,
-                            newStatus: newOrderStatus,
-                            changedBy: employeeId,
-                            createdBy: order.created_by,
-                        })
-                    );
-                    break;
+        //         case ORDER_STATUSES.PRODUCTION:
+        //         case ORDER_STATUSES.PACKED:
+        //             fireNotification(
+        //                 notifyOrderStatusChanged({
+        //                     order,
+        //                     newStatus: newOrderStatus,
+        //                     changedBy: employeeId,
+        //                     createdBy: order.created_by,
+        //                 })
+        //             );
+        //             break;
 
-                default:
-                    break;
-            }
-        }
+        //         default:
+        //             break;
+        //     }
+        // }
 
         return transformOrderToResponse(order, null, updatedDetails);
     }),
@@ -1212,30 +1214,30 @@ const orderService = {
 
         logger.info(`🔄 Order Status Updated — order_number: ${orderNumber} | ${prev} → ${order.status}`);
 
-        // Notifications 
-        if (prev !== order.status) {
-            if (order.status === ORDER_STATUSES.CONFIRMED) {
-                fireNotification(
-                    notifyOrderConfirmed({
-                        order,
-                        confirmedBy: employeeId,
-                        createdBy: order.created_by,
-                    })
-                );
-            } else if (
-                order.status === ORDER_STATUSES.PRODUCTION ||
-                order.status === ORDER_STATUSES.PACKED
-            ) {
-                fireNotification(
-                    notifyOrderStatusChanged({
-                        order,
-                        newStatus: order.status,
-                        changedBy: employeeId,
-                        createdBy: order.created_by,
-                    })
-                );
-            }
-        }
+        // // Notifications 
+        // if (prev !== order.status) {
+        //     if (order.status === ORDER_STATUSES.CONFIRMED) {
+        //         fireNotification(
+        //             notifyOrderConfirmed({
+        //                 order,
+        //                 confirmedBy: employeeId,
+        //                 createdBy: order.created_by,
+        //             })
+        //         );
+        //     } else if (
+        //         order.status === ORDER_STATUSES.PRODUCTION ||
+        //         order.status === ORDER_STATUSES.PACKED
+        //     ) {
+        //         fireNotification(
+        //             notifyOrderStatusChanged({
+        //                 order,
+        //                 newStatus: order.status,
+        //                 changedBy: employeeId,
+        //                 createdBy: order.created_by,
+        //             })
+        //         );
+        //     }
+        // }
 
         const dealer = await Employee.findOne({ employee_id: order.dealer_id, role: ROLES.DEALER });
         const refreshedDetails = await OrderDetails.find({ order_number: orderNumber });
@@ -1417,6 +1419,21 @@ const orderService = {
         }
 
         await order.save();
+
+        if (prevOrderStatus !== order.status) {
+            const dealer = await Employee.findOne({
+                employee_id: order.dealer_id,
+                role: ROLES.DEALER,
+            }).lean();
+
+            notificationService.sendOrderStatusChangedAsync({
+                order,
+                previousStatus: prevOrderStatus,
+                triggeredBy: employeeId,
+                triggeredByName: employee?.employee_name,
+                dealer,
+            });
+        }
 
         return transformOrderToResponse(order, null, updatedDetails);
     }),

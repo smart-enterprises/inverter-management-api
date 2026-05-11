@@ -8,56 +8,56 @@ import {
     FIREBASE_CLIENT_EMAIL,
     FIREBASE_PRIVATE_KEY,
     FIREBASE_SERVICE_ACCOUNT_PATH,
+    ENVIRONMENT,
 } from "../utils/constants.js";
 
 let firebaseApp = null;
 
-const resolveCredential = () => {
-    if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
-        logger.info("[Firebase] Using env-var credentials");
-        return admin.credential.cert({
-            projectId: FIREBASE_PROJECT_ID,
-            clientEmail: FIREBASE_CLIENT_EMAIL,
-            privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-        });
-    }
-
-    if (FIREBASE_SERVICE_ACCOUNT_PATH) {
-        logger.info("[Firebase] Using service-account file credentials");
-        const serviceAccount = JSON.parse(
-            readFileSync(resolve(FIREBASE_SERVICE_ACCOUNT_PATH), "utf8")
-        );
-        return admin.credential.cert(serviceAccount);
-    }
-
-    logger.warn("[Firebase] Falling back to Application Default Credentials");
-    return admin.credential.applicationDefault();
-};
-
 export const initializeFirebase = () => {
-    if (admin.apps.length > 0) {
-        firebaseApp = admin.apps[0];
-        logger.info("[Firebase] Admin SDK already initialised — reusing existing app");
+    if (firebaseApp) {
+        logger.info("[Firebase] Already initialized — skipping.");
         return firebaseApp;
     }
 
     try {
-        firebaseApp = admin.initializeApp({ credential: resolveCredential() });
-        logger.info("[Firebase] Admin SDK initialised successfully");
+        let credential;
+
+        if (FIREBASE_SERVICE_ACCOUNT_PATH) {
+            const serviceAccount = JSON.parse(
+                readFileSync(resolve(FIREBASE_SERVICE_ACCOUNT_PATH), "utf8")
+            );
+            credential = admin.credential.cert(serviceAccount);
+            logger.info("[Firebase] Initialized via service account file.");
+        } else if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+            credential = admin.credential.cert({
+                projectId: FIREBASE_PROJECT_ID,
+                clientEmail: FIREBASE_CLIENT_EMAIL,
+                privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+            });
+            logger.info("[Firebase] Initialized via environment variables.");
+        } else {
+            throw new Error(
+                "Firebase credentials missing. Provide FIREBASE_SERVICE_ACCOUNT_PATH " +
+                "or FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY."
+            );
+        }
+
+        firebaseApp = admin.initializeApp({ credential });
+        logger.info(`[Firebase] App initialized for project: ${FIREBASE_PROJECT_ID || "from-file"}`);
         return firebaseApp;
-    } catch (err) {
-        logger.error("[Firebase] Failed to initialise Admin SDK:", err.message);
-        throw err;
+
+    } catch (error) {
+        logger.error("[Firebase] Initialization failed:", { error: error.message });
+        if (ENVIRONMENT === "production") process.exit(1);
+        return null;
     }
 };
 
-export const getFirebaseMessaging = () => {
-    if (!firebaseApp) {
-        throw new Error(
-            "[Firebase] App not initialised. Call initializeFirebase() before using messaging."
-        );
+export const getMessaging = () => {
+    if (!admin.apps.length) {
+        throw new Error("[Firebase] Not initialized. Call initializeFirebase() first.");
     }
-    return admin.messaging(firebaseApp);
+    return admin.messaging();
 };
 
-export default admin;
+export default { initializeFirebase, getMessaging };
