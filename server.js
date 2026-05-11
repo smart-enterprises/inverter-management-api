@@ -17,7 +17,7 @@ import chalk from "chalk";
 
 import logger, { apiLogger } from "./utils/logger.js";
 import { handleRateLimitError, globalErrorHandler } from "./middleware/errorHandler.js";
-import { initializeFirebase } from './config/firebaseConfig.js';
+import { initializeFirebase } from "./config/firebaseConfig.js";
 
 import employeeRoute from "./routes/employeeRoute.js";
 import authRoute from "./routes/authRoute.js";
@@ -86,7 +86,7 @@ const notificationLimiter = rateLimit({
     keyGenerator: (req) =>
         req.user?.id || req.headers["x-forwarded-for"] || req.ip,
 
-    skip: (req) => req.path.startsWith("/sse"),
+    skip: (req) => req.path.startsWith(PATH_ROUTES.NOTIFICATION_ROUTE),
 
     message: {
         success: false,
