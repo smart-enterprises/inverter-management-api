@@ -24,8 +24,7 @@ import { allDetailsDelivered, canMoveOrderToTargetStatus, deriveOrderStatusFromD
 import { validateOrderCreator, validateOrderDTO } from "./orderValidation.js";
 import { persistStockReturns, returnStockForDetail } from "./orderStock.js";
 import { buildDateRange, fetchDealerAndOrderDetails } from "./orderHelpers.js";
-// import { fireNotification, shouldNotifyStatusChange } from "./orderHelpers.js";
-// import { notifyOrderConfirmed, notifyOrderCreated, notifyOrderStatusChanged } from "../firebaseNotificationService.js";
+import { notificationService } from "../notification/notificationService.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -268,14 +267,17 @@ const orderService = {
 
         logger.info(`✅ Order created — #${orderNumber} | Items: ${orderDetailsList.length}`);
 
-        // ── Notification: Order Created (non-blocking)
-        // fireNotification(
-        //     notifyOrderCreated({
-        //         order: { ...order.toObject(), order_details: orderDetailsList },
-        //         dealer,
-        //         createdBy: employeeId,
-        //     })
-        // );
+        const salesman = await Employee.findOne({
+            employee_id: order.salesman_id || employeeId,
+            status: "active",
+        }).lean();
+
+        notificationService.sendOrderCreatedAsync({
+            order,
+            dealer,
+            salesman,
+            triggeredBy: employeeId,
+        });
 
         return transformOrderToResponse(order, dealer, orderDetailsList);
     }),
@@ -1417,6 +1419,21 @@ const orderService = {
         }
 
         await order.save();
+
+        if (prevOrderStatus !== order.status) {
+            const dealer = await Employee.findOne({
+                employee_id: order.dealer_id,
+                role: ROLES.DEALER,
+            }).lean();
+
+            notificationService.sendOrderStatusChangedAsync({
+                order,
+                previousStatus: prevOrderStatus,
+                triggeredBy: employeeId,
+                triggeredByName: employee?.employee_name,
+                dealer,
+            });
+        }
 
         return transformOrderToResponse(order, null, updatedDetails);
     }),
