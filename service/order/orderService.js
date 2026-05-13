@@ -863,7 +863,6 @@ const orderService = {
             .filter(d => !d.is_free)
             .reduce((sum, d) => sum + toNumber(d.total_dealer_discount), 0);
 
-        const prevOrderStatus = order.status;
         order.status = allDetailsDelivered(refreshedDetails)
             ? ORDER_STATUSES.COMPLETED
             : deriveOrderStatusFromDetails(refreshedDetails);
@@ -875,48 +874,6 @@ const orderService = {
             from: previousStatus,
             to: orderDetail.status,
         });
-
-        // Notifications for order status changes
-        const newOrderStatus = order.status;
-
-        // if (normalizedStatus == ORDER_STATUSES.CONFIRMED) {
-        //     fireNotification(
-        //         notifyOrderConfirmed({
-        //             order,
-        //             confirmedBy: employeeId,
-        //             createdBy: order.created_by,
-        //         })
-        //     );
-        // }
-
-        // if (prevOrderStatus !== newOrderStatus && shouldNotifyStatusChange(prevOrderStatus, newOrderStatus)) {
-        //     switch (newOrderStatus) {
-        //         case ORDER_STATUSES.CONFIRMED:
-        //             fireNotification(
-        //                 notifyOrderConfirmed({
-        //                     order,
-        //                     confirmedBy: employeeId,
-        //                     createdBy: order.created_by,
-        //                 })
-        //             );
-        //             break;
-
-        //         case ORDER_STATUSES.PRODUCTION:
-        //         case ORDER_STATUSES.PACKED:
-        //             fireNotification(
-        //                 notifyOrderStatusChanged({
-        //                     order,
-        //                     newStatus: newOrderStatus,
-        //                     changedBy: employeeId,
-        //                     createdBy: order.created_by,
-        //                 })
-        //             );
-        //             break;
-
-        //         default:
-        //             break;
-        //     }
-        // }
 
         return mapOrderDetailEntityToResponse(orderDetail);
     }),
@@ -1420,19 +1377,47 @@ const orderService = {
 
         await order.save();
 
-        if (prevOrderStatus !== order.status) {
+        // Check if any order detail has production completed
+        const hasProductionCompleted = order_details?.some(
+            (detail) => detail?.has_production_completed === true
+        );
+
+        const isOrderConfirmed = prevOrderStatus !== ORDER_STATUSES.CONFIRMED && status === ORDER_STATUSES.CONFIRMED;
+
+        if (prevOrderStatus !== order.status || hasProductionCompleted || isOrderConfirmed) {
             const dealer = await Employee.findOne({
                 employee_id: order.dealer_id,
                 role: ROLES.DEALER,
             }).lean();
 
-            notificationService.sendOrderStatusChangedAsync({
-                order,
-                previousStatus: prevOrderStatus,
-                triggeredBy: employeeId,
-                triggeredByName: employee?.employee_name,
-                dealer,
-            });
+            if (isOrderConfirmed) {
+                notificationService.sendOrderConfirmedAsync({
+                    order,
+                    previousStatus: prevOrderStatus,
+                    triggeredBy: employeeId,
+                    triggeredByName: employee?.employee_name,
+                    dealer,
+                });
+            }
+
+            if (prevOrderStatus !== order.status) {
+                notificationService.sendOrderStatusChangedAsync({
+                    order,
+                    previousStatus: prevOrderStatus,
+                    triggeredBy: employeeId,
+                    triggeredByName: employee?.employee_name,
+                    dealer,
+                });
+            }
+
+            if (hasProductionCompleted) {
+                notificationService.sendProductionCompletedAsync({
+                    order,
+                    triggeredBy: employeeId,
+                    triggeredByName: employee?.employee_name,
+                    dealer,
+                });
+            }
         }
 
         return transformOrderToResponse(order, null, updatedDetails);
