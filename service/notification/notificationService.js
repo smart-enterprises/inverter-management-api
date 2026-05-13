@@ -2,6 +2,7 @@ import logger from "../../utils/logger.js";
 import { v4 as uuidv4 } from "uuid";
 import { ORDER_STATUSES } from "../../utils/constants.js";
 import {
+    NOTIFICATION_TARGET_ROLES,
     NOTIFICATION_TYPES,
     ORDER_NOTIFICATION_TYPE_BY_STATUS,
 } from "../../utils/notificationConstants.js";
@@ -96,6 +97,8 @@ export const notificationService = {
                     ? NOTIFICATION_TYPES.ORDER_CREATED_PRODUCTION
                     : NOTIFICATION_TYPES.ORDER_CREATED_PACKED;
 
+        const targetRoles = NOTIFICATION_TARGET_ROLES[notificationType];
+
         return notificationService.send({
             notificationType,
             context: {
@@ -105,6 +108,7 @@ export const notificationService = {
                 priority: order.priority,
                 order_status: order.status,
             },
+            targetRoles,
             targetEmployeeIds: [order.salesman_id, order.created_by],
             excludeEmployeeIds: [triggeredBy],
             triggeredBy,
@@ -112,9 +116,53 @@ export const notificationService = {
         });
     },
 
+    sendOrderConfirmed: async ({
+        order,
+        previousStatus,
+        triggeredBy,
+        triggeredByName,
+        dealer,
+    }) => {
+        const notificationType = ORDER_NOTIFICATION_TYPE_BY_STATUS[ORDER_STATUSES.CONFIRMED];
+        if (!notificationType) return null;
+
+        const targetRoles = NOTIFICATION_TARGET_ROLES[notificationType];
+
+        return notificationService.send({
+            notificationType,
+            context: {
+                order_number: order.order_number,
+                dealer_name: dealer?.shop_name || dealer?.employee_name || "Unknown Dealer",
+                priority: order.priority,
+                order_status: order.status,
+                triggered_by_name: triggeredByName || triggeredBy,
+                title: "Order Confirmed",
+                message:
+                    `Order ${order.order_number} has been confirmed successfully` +
+                    `${dealer?.shop_name ? ` for ${dealer.shop_name}` : ""}.`,
+            },
+            targetRoles,
+            targetEmployeeIds: [order.salesman_id, order.created_by,].filter(Boolean),
+            excludeEmployeeIds: [triggeredBy],
+            triggeredBy,
+            metadata: {
+                source: "order_status_changed",
+                action: "ORDER_CONFIRMED",
+                previous_status: previousStatus,
+                new_status: order.status,
+                order_id: order.order_id,
+                order_number: order.order_number,
+                dealer_id: dealer?.employee_id || null,
+                confirmed_at: new Date().toISOString(),
+            },
+        });
+    },
+
     sendOrderStatusChanged: async ({ order, previousStatus, triggeredBy, triggeredByName, dealer }) => {
         const notificationType = ORDER_NOTIFICATION_TYPE_BY_STATUS[order.status];
         if (!notificationType) return null;
+
+        const targetRoles = NOTIFICATION_TARGET_ROLES[notificationType];
 
         return notificationService.send({
             notificationType,
@@ -125,6 +173,7 @@ export const notificationService = {
                 order_status: order.status,
                 triggered_by_name: triggeredByName || triggeredBy,
             },
+            targetRoles,
             targetEmployeeIds: [order.salesman_id, order.created_by],
             excludeEmployeeIds: [triggeredBy],
             triggeredBy,
@@ -136,13 +185,49 @@ export const notificationService = {
         });
     },
 
+    sendProductionCompleted: async ({
+        order,
+        triggeredBy,
+        triggeredByName,
+        dealer,
+    }) => {
+        return notificationService.send({
+            notificationType: NOTIFICATION_TYPES.ORDER_STATUS_PRODUCTION_COMPLETED,
+            context: {
+                order_number: order.order_number,
+                dealer_name: dealer?.shop_name || dealer?.employee_name,
+                priority: order.priority,
+                order_status: order.status,
+                triggered_by_name: triggeredByName || triggeredBy,
+            },
+            targetRoles: NOTIFICATION_TARGET_ROLES[NOTIFICATION_TYPES.ORDER_STATUS_PRODUCTION_COMPLETED],
+            targetEmployeeIds: [order.salesman_id, order.created_by],
+            excludeEmployeeIds: [triggeredBy],
+            triggeredBy,
+            metadata: {
+                source: "production_completed",
+                order_status: order.status,
+            },
+        });
+    },
+
     sendOrderCreatedAsync: (payload) => fireAndForget(
         notificationService.sendOrderCreated(payload),
         "Order created notification"
     ),
 
+    sendOrderConfirmedAsync: (payload) => fireAndForget(
+        notificationService.sendOrderConfirmed(payload),
+        "Order confirmed notification"
+    ),
+
     sendOrderStatusChangedAsync: (payload) => fireAndForget(
         notificationService.sendOrderStatusChanged(payload),
         "Order status notification"
+    ),
+
+    sendProductionCompletedAsync: (payload) => fireAndForget(
+        notificationService.sendProductionCompleted(payload),
+        "Production completed notification"
     ),
 };

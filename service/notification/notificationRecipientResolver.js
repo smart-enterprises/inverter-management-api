@@ -29,6 +29,8 @@ export const notificationRecipientResolver = {
             return { roles, employeeIds: [], recipients: [], tokens: [] };
         }
 
+        console.log("notificationType", notificationType, "employeeIds", employeeIds);
+
         const tokenRecords = await deviceTokenService.getActiveTokenRecordsByEmployeeIds(employeeIds);
         const dedupedByToken = new Map();
 
