@@ -136,6 +136,31 @@ export const notificationService = {
         });
     },
 
+    sendProductionCompleted: async ({
+        order,
+        triggeredBy,
+        triggeredByName,
+        dealer,
+    }) => {
+        return notificationService.send({
+            notificationType: NOTIFICATION_TYPES.ORDER_STATUS_PRODUCTION_COMPLETED,
+            context: {
+                order_number: order.order_number,
+                dealer_name: dealer?.shop_name || dealer?.employee_name,
+                priority: order.priority,
+                order_status: order.status,
+                triggered_by_name: triggeredByName || triggeredBy,
+            },
+            targetEmployeeIds: [order.salesman_id, order.created_by],
+            excludeEmployeeIds: [triggeredBy],
+            triggeredBy,
+            metadata: {
+                source: "production_completed",
+                order_status: order.status,
+            },
+        });
+    },
+
     sendOrderCreatedAsync: (payload) => fireAndForget(
         notificationService.sendOrderCreated(payload),
         "Order created notification"
@@ -144,5 +169,10 @@ export const notificationService = {
     sendOrderStatusChangedAsync: (payload) => fireAndForget(
         notificationService.sendOrderStatusChanged(payload),
         "Order status notification"
+    ),
+
+    sendProductionCompletedAsync: (payload) => fireAndForget(
+        notificationService.sendProductionCompleted(payload),
+        "Production completed notification"
     ),
 };
