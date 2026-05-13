@@ -1382,11 +1382,23 @@ const orderService = {
             (detail) => detail?.has_production_completed === true
         );
 
-        if (prevOrderStatus !== order.status || hasProductionCompleted) {
+        const isOrderConfirmed = prevOrderStatus !== ORDER_STATUSES.CONFIRMED && status === ORDER_STATUSES.CONFIRMED;
+
+        if (prevOrderStatus !== order.status || hasProductionCompleted || isOrderConfirmed) {
             const dealer = await Employee.findOne({
                 employee_id: order.dealer_id,
                 role: ROLES.DEALER,
             }).lean();
+
+            if (isOrderConfirmed) {
+                notificationService.sendOrderConfirmedAsync({
+                    order,
+                    previousStatus: prevOrderStatus,
+                    triggeredBy: employeeId,
+                    triggeredByName: employee?.employee_name,
+                    dealer,
+                });
+            }
 
             if (prevOrderStatus !== order.status) {
                 notificationService.sendOrderStatusChangedAsync({
