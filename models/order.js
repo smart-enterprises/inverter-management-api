@@ -97,6 +97,11 @@ const orderSchema = new mongoose.Schema({
     },
 });
 
+orderSchema.index({ dealer_id: 1, created_at: -1 });
+orderSchema.index({ salesman_id: 1, created_at: -1 });
+orderSchema.index({ status: 1 });
+orderSchema.index({ created_at: -1 });
+
 orderSchema.pre("save", function (next) {
     const now = getISTDate();
     this.updated_at = now;
