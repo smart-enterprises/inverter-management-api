@@ -789,7 +789,9 @@ const orderService = {
                 appendNote(`Delivered ${deliveredQty} unit(s) on ${deliveredAt.toISOString()}`);
             }
 
-            orderDetail.delivery_date = deliveredAt;
+            if (deliveredAt) {
+                orderDetail.delivery_date = deliveredAt;
+            }
         }
 
         logger.info("[OrderDetail][Returns]", returns);
