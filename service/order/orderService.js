@@ -14,7 +14,7 @@ import { generateUniqueOrderDetailsId, generateUniqueOrderId } from "../../utils
 import { BadRequestException, ForbiddenException } from "../../middleware/CustomError.js";
 import { getAuthenticatedEmployeeContext, isValidTransition, normalizePrice, round, sanitizeInput } from "../../utils/validationUtils.js";
 
-import { getISTDate, ROLES, STOCK_TYPES, ORDER_STATUSES, CANCELLABLE_STATUSES, ADMIN_PRIVILEGED_ROLES, STATUSES_REQUIRING_DETAIL_VALIDATION, IMMUTABLE_ORDER_STATUSES } from "../../utils/constants.js";
+import { getISTDate, ROLES, STOCK_TYPES, ORDER_STATUSES, CANCELLABLE_STATUSES, ADMIN_PRIVILEGED_ROLES, STATUSES_REQUIRING_DETAIL_VALIDATION, IMMUTABLE_ORDER_STATUSES, ENABLE_STOCK_RETURNS } from "../../utils/constants.js";
 import { mapOrderDetailEntityToResponse, transformOrderToResponse } from "../../utils/modelMapper.js";
 import { productService } from "../productService.js";
 import Product from "../../models/product.js";
@@ -672,8 +672,9 @@ const orderService = {
 
         if (updateDto.status) {
             normalizedStatus = normalizeStatus(updateDto.status);
+            const isCancellationStatus = [ORDER_STATUSES.CANCELLED, ORDER_STATUSES.REJECTED].includes(normalizedStatus);
 
-            if (normalizedStatus === ORDER_STATUSES.CANCELLED) {
+            if (isCancellationStatus) {
                 updateDto.cancel_qty = orderDetail.qty_ordered - orderDetail.qty_delivered - orderDetail.total_cancelled_qty;
             }
         }
@@ -789,12 +790,14 @@ const orderService = {
                 appendNote(`Delivered ${deliveredQty} unit(s) on ${deliveredAt.toISOString()}`);
             }
 
-            orderDetail.delivery_date = deliveredAt;
+            if (deliveredAt) {
+                orderDetail.delivery_date = deliveredAt;
+            }
         }
 
-        logger.info("[OrderDetail][Returns]", returns);
+        logger.info(`[OrderDetail][Returns] ${JSON.stringify({ returnsLength: returns.length, returns }, null, 2)}`);
 
-        if (returns.length > 0) {
+        if (returns.length > 0 && ENABLE_STOCK_RETURNS === "true") {
             await persistStockReturns({
                 product,
                 returns,
@@ -1096,6 +1099,8 @@ const orderService = {
         orderNumber
     }) => {
         for (const detail of updatedDetails) {
+            logger.info(`🔄 Returning stock for order detail ${d._id} → ${normalized} ${JSON.stringify(d, null, 2)}`);
+
             await returnStockForDetail({ d: detail, employeeId, employeeRole, orderNumber });
             detail.status = ORDER_STATUSES.CANCELLED;
             await detail.save();
@@ -1157,6 +1162,7 @@ const orderService = {
 
         if ([ORDER_STATUSES.CANCELLED, ORDER_STATUSES.REJECTED].includes(normalized)) {
             for (const d of details) {
+                logger.info(`🔄 Returning stock for order detail ${d._id} → ${normalized} ${JSON.stringify(d, null, 2)}`);
                 await returnStockForDetail({ d, employeeId, employeeRole, orderNumber });
                 d.status = normalized;
                 await d.save();
@@ -1281,26 +1287,15 @@ const orderService = {
         if (status) {
             const normalizedStatus = normalizeStatus(status);
 
-            // Cascade status to all order details
-            await Promise.all(
-                updatedDetails.map(detail =>
-                    orderService.updateOrderDetailStatus(
-                        detail.order_details_number, { status: normalizedStatus }
-                    )
-                )
-            );
+            // Cascade status to all order details (sequential to avoid races on parent Order.save())
+            for (const detail of updatedDetails) {
+                await orderService.updateOrderDetailStatus(
+                    detail.order_details_number, { status: normalizedStatus }
+                );
+            }
 
             // Re-fetch after cascading update
             updatedDetails = await OrderDetails.find({ order_number: orderNumber });
-
-            await orderService.applyOrderStatusChange({
-                order,
-                updatedDetails,
-                status: normalizedStatus,
-                employeeId,
-                employeeRole,
-                orderNumber
-            });
         } else {
             // Auto-derive order status from details
             let derivedStatus = deriveOrderStatusFromDetails(updatedDetails);

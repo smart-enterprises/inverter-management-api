@@ -124,6 +124,11 @@ const orderDetailsSchema = new mongoose.Schema({
     },
 });
 
+orderDetailsSchema.index({ order_number: 1 });
+orderDetailsSchema.index({ product_id: 1 });
+orderDetailsSchema.index({ status: 1 });
+orderDetailsSchema.index({ order_number: 1, status: 1 });
+
 orderDetailsSchema.pre("save", function (next) {
     const istNow = getISTDate();
     if (this.isNew) this.created_at = istNow;
