@@ -69,6 +69,7 @@ export const {
     FIREBASE_CLIENT_EMAIL,
     FIREBASE_PRIVATE_KEY,
     FIREBASE_SERVICE_ACCOUNT_PATH,
+    ENABLE_STOCK_RETURNS = false
 } = process.env;
 
 export const ROLES = {
