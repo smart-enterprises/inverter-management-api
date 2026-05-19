@@ -797,11 +797,7 @@ const orderService = {
 
         logger.info(`[OrderDetail][Returns] ${JSON.stringify({ returnsLength: returns.length, returns }, null, 2)}`);
 
-        console.log("Enable Stock Returns: ", ENABLE_STOCK_RETURNS);
-
         if (returns.length > 0 && ENABLE_STOCK_RETURNS === "true") {
-            console.log("ACCESS THE RETURNS");
-
             await persistStockReturns({
                 product,
                 returns,
