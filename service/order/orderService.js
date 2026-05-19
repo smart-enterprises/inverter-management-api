@@ -1283,14 +1283,12 @@ const orderService = {
         if (status) {
             const normalizedStatus = normalizeStatus(status);
 
-            // Cascade status to all order details
-            await Promise.all(
-                updatedDetails.map(detail =>
-                    orderService.updateOrderDetailStatus(
-                        detail.order_details_number, { status: normalizedStatus }
-                    )
-                )
-            );
+            // Cascade status to all order details (sequential to avoid races on parent Order.save())
+            for (const detail of updatedDetails) {
+                await orderService.updateOrderDetailStatus(
+                    detail.order_details_number, { status: normalizedStatus }
+                );
+            }
 
             // Re-fetch after cascading update
             updatedDetails = await OrderDetails.find({ order_number: orderNumber });
