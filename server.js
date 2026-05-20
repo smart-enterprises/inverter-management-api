@@ -29,6 +29,7 @@ import companyRoute from "./routes/companyAddressRoute.js";
 import invoiceRoute from "./routes/invoiceRoute.js";
 import bulkImportRoute from "./routes/bulkImportRoute.js";
 import notificationRoute from "./routes/notificationRoute.js";
+import analyticsRoute from "./routes/analyticsRoute.js";
 
 import { PATH_ROUTES, APPLICATION_NAME, ENVIRONMENT, PORT, APPLICATION_URL, ALLOWED_ORIGINS } from "./utils/constants.js";
 
@@ -224,6 +225,7 @@ app.use(PATH_ROUTES.COMPANY_ROUTE, companyRoute);
 app.use(PATH_ROUTES.BULK_IMPORT_ROUTE, bulkImportRoute);
 
 app.use(PATH_ROUTES.NOTIFICATION_ROUTE, notificationRoute);
+app.use(PATH_ROUTES.ANALYTICS_ROUTE, analyticsRoute);
 
 // 404 catch-all
 app.use((req, _res, next) => {

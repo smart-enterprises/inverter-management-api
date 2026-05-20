@@ -44,6 +44,9 @@ export const PATH_ROUTES = {
     get NOTIFICATION_ROUTE() {
         return `${this.BASIC_ROUTE}/notifications`;
     },
+    get ANALYTICS_ROUTE() {
+        return `${this.BASIC_ROUTE}/analytics`;
+    },
 };
 
 export const {
@@ -69,8 +72,13 @@ export const {
     FIREBASE_CLIENT_EMAIL,
     FIREBASE_PRIVATE_KEY,
     FIREBASE_SERVICE_ACCOUNT_PATH,
-    ENABLE_STOCK_RETURNS = false
+    ENABLE_STOCK_RETURNS = false,
+    SALESMAN_DEFAULT_TARGET_QTY,
 } = process.env;
+
+// Fallback target (total ITEMS sold = sum of order_details.qty_ordered per salesman).
+// Used until per-salesman targets are configured in the DB.
+export const DEFAULT_SALESMAN_TARGET_QTY = Number(SALESMAN_DEFAULT_TARGET_QTY) || 500;
 
 export const ROLES = {
     SUPER_ADMIN: 'ROLE_SUPER_ADMIN',
