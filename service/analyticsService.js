@@ -16,12 +16,13 @@ import { DEFAULT_SALESMAN_TARGET_QTY, ORDER_STATUSES, ROLES } from "../utils/con
 const MAX_LIMIT = 100;
 const DEFAULT_TOP_N = 10;
 
-const ADMIN_VIEW_ROLES = new Set([
+// Analytics access is restricted to these three roles only.
+// Sales team / dealers / accounts / production / packing / delivery / supervisor
+// don't see analytics — frontend hides the page, backend returns 403.
+const ANALYTICS_ALLOWED_ROLES = new Set([
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
-    ROLES.SUPERVISOR,
     ROLES.MANAGER,
-    ROLES.ACCOUNTS,
 ]);
 
 const parseDate = (value, label) => {
@@ -45,22 +46,19 @@ const parseLimit = (value, fallback = DEFAULT_TOP_N) => {
 // - Dealers are forced to their own dealer_id.
 // - Other roles are forbidden from analytics.
 const buildScopedMatch = ({ from, to, dealer_id, salesman_id }) => {
-    const { employeeId, employeeRole } = getAuthenticatedEmployeeContext();
+    const { employeeRole } = getAuthenticatedEmployeeContext();
+
+    if (!ANALYTICS_ALLOWED_ROLES.has(employeeRole)) {
+        throw new ForbiddenException("Analytics is not available for your role.");
+    }
 
     const match = {
         created_at: { $gte: from, $lte: to },
     };
 
-    if (ADMIN_VIEW_ROLES.has(employeeRole)) {
-        if (dealer_id) match.dealer_id = String(dealer_id);
-        if (salesman_id) match.salesman_id = String(salesman_id);
-    } else if (employeeRole === ROLES.SALESMAN) {
-        match.salesman_id = employeeId;
-    } else if (employeeRole === ROLES.DEALER) {
-        match.dealer_id = employeeId;
-    } else {
-        throw new ForbiddenException("Analytics is not available for your role.");
-    }
+    // Admin-tier may optionally narrow by dealer or salesman.
+    if (dealer_id) match.dealer_id = String(dealer_id);
+    if (salesman_id) match.salesman_id = String(salesman_id);
 
     return match;
 };
